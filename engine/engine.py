@@ -116,122 +116,97 @@ class GridEngine:
         # 0. Watchdog: ensure connection
         await self.broker.ensure_connected()
 
-        # 1. Refresh grid periodically
-        if (datetime.now() - self._last_grid_refresh).total_seconds() > 900: # 15 mins
-            logger.info("Refreshing grid state from sheet")
-            self.grid_state = await self.sheet.fetch_grid()
-            self._last_grid_refresh = datetime.now()
-
+        # 1. Always Refresh grid from sheet
+        self.grid_state = await self.sheet.fetch_grid()
         if not self.grid_state:
             return
 
-        # 2. Reconcile orders periodically
-        if (datetime.now() - self._last_reconciliation).total_seconds() > 60: # 1 min
-            await self._reconcile_orders()
-            self._last_reconciliation = datetime.now()
+        # 2. Circuit Breaker
+        positions = await self.broker.get_positions()
+        broker_shares = positions.get(TICKER, 0)
+        sheet_shares = sum(row.shares for row in self.grid_state.rows.values() if row.has_y)
 
-        # 3. Get market data
-        try:
-            bid, ask = await self.broker.get_bid_ask(TICKER)
-            price = (bid + ask) / 2 # Use mid-price for trigger check
-            self.last_price = price
-        except Exception as e:
-            logger.warning(f"Failed to get market data: {e}")
+        if broker_shares != sheet_shares:
+            msg = f"CIRCUIT BREAKER: Share discrepancy. Broker: {broker_shares}, Sheet: {sheet_shares}. Halting cycle."
+            logger.critical(msg)
+            await self.sheet.log_error(msg)
             return
 
-        # 4. Spread Guard check
-        if self.spread_guard.is_too_wide(bid, ask):
-            return
+        # 3. Calculate Window
+        distal_y = self.grid_state.distal_y_row
+        window_start = max(7, distal_y - 3)
+        window_end = max(7, distal_y + 3)
+        window_range = range(window_start, window_end + 1)
 
-        # 5. Check triggers
-        await self._check_triggers(price)
+        # 4. Get current open orders for evaluation
+        open_orders = await self.broker.get_open_orders()
+        broker_order_ids = {o['order_id'] for o in open_orders}
 
-    async def _reconcile_orders(self):
-        logger.debug("Reconciling orders with broker")
-        try:
-            open_orders = await self.broker.get_open_orders()
-            broker_order_ids = {o['order_id'] for o in open_orders}
-            tracked_order_ids = self.order_manager.get_tracked_order_ids()
-
-            # 1. Clear tracked orders that no longer exist at broker
-            for oid in tracked_order_ids:
-                if oid not in broker_order_ids:
-                    logger.warning(f"Order {oid} tracked but not found at broker. Marking cancelled for safety.")
-                    self.order_manager.mark_cancelled(oid)
-
-            # 2. Re-track orders found at broker that are NOT in OrderManager
-            # This handles self-healing after bot restart.
-            for order in open_orders:
-                oid = order['order_id']
-                if oid not in tracked_order_ids:
-                    self._retrack_broker_order(order)
-
-        except Exception as e:
-            logger.error(f"Reconciliation failed: {e}")
-
-    def _retrack_broker_order(self, order: dict):
-        """Attempts to match an orphan broker order to a grid level."""
-        oid = order['order_id']
-        price = order['limit_price']
-        qty = order['qty']
-        action = order['action']
-
-        # Look for a matching level in grid_state
+        # 5. Grid Evaluation
         for row in self.grid_state.rows.values():
-            limit_price = row.buy_price if action == 'BUY' else row.sell_price
-            if limit_price == price and row.shares == qty:
-                # Found a match. Retrack it.
-                logger.info(f"Retracking orphan broker order {oid} to grid row {row.row_index}")
-                self.order_manager.track(row.row_index, OrderResult(order_id=oid, status='submitted'), action)
-                return
+            in_window = row.row_index in window_range
 
-    async def _check_triggers(self, current_price: float):
-        for row in self.grid_state.rows.values():
-            # In legacy v4, status "Working" often meant an order was already out.
-            # But we'll rely on our OrderManager for absolute truth of this session.
+            # Parse existing status to check for current orders and historical IDs
+            status_parts = row.status.split('|')
+            active_order_id = None
+            owned_id = None
+            for part in status_parts:
+                if part.startswith("WORKING_SELL:") or part.startswith("WORKING_BUY:"):
+                    active_order_id = part.split(":")[1]
+                elif part.startswith("OWNED:"):
+                    owned_id = part.split(":")[1]
 
-            # Buy check: if status is empty/ready and we don't have an open buy
-            # In some v4 variants, price < buy_price triggers it.
-            # Let's assume: if status is "Ready" (or similar) or we use the 'has_y' as an additional filter.
-            # The prompt says: "fetch_grid() should read cols C through H (rows 7 to 100), evaluating has_y if the string 'Y' is present in Column D."
-            # Usually 'Y' in Column D (Strategy) means this row is active for the current strategy.
+            # If an order is in Column C but not tracked, subscribe/track it
+            if active_order_id and active_order_id in broker_order_ids:
+                if not self.order_manager.is_tracked(active_order_id):
+                    logger.info(f"Re-tracking order {active_order_id} from sheet status for row {row.row_index}")
+                    action = 'SELL' if "WORKING_SELL" in row.status else 'BUY'
+                    self.broker.subscribe_to_fill(active_order_id, self._on_fill)
+                    self.order_manager.track(row.row_index, OrderResult(order_id=active_order_id, status='submitted'), action)
 
-            if not row.has_y:
-                continue
+            if in_window:
+                if row.has_y:
+                    # Expect active SELL order
+                    if not self.order_manager.has_open_sell(row.row_index):
+                        logger.info(f"Placing missing SELL for owned row {row.row_index}")
+                        result = await self.broker.place_limit_order(
+                            ticker=TICKER, action='SELL', qty=row.shares,
+                            limit_price=row.sell_price, on_fill=self._on_fill
+                        )
+                        if result.status == 'submitted':
+                            self.order_manager.track(row.row_index, result, 'SELL')
+                            new_status = f"WORKING_SELL:{result.order_id}"
+                            if owned_id: new_status += f"|OWNED:{owned_id}"
+                            await self.sheet.update_row_status(row.row_index, new_status)
+                elif row.row_index > distal_y:
+                    # Expect active BUY order
+                    if not self.order_manager.has_open_buy(row.row_index):
+                        logger.info(f"Placing missing BUY for empty row {row.row_index}")
+                        result = await self.broker.place_limit_order(
+                            ticker=TICKER, action='BUY', qty=row.shares,
+                            limit_price=row.buy_price, on_fill=self._on_fill
+                        )
+                        if result.status == 'submitted':
+                            self.order_manager.track(row.row_index, result, 'BUY')
+                            await self.sheet.update_row_status(row.row_index, f"WORKING_BUY:{result.order_id}")
+            else:
+                # Outside window
+                # Cancel any active orders for this row
+                if row.row_index in self.order_manager._row_to_orders:
+                    oids = list(self.order_manager._row_to_orders[row.row_index])
+                    for oid in oids:
+                        logger.info(f"Cancelling order {oid} for row {row.row_index} (outside window)")
+                        await self.broker.cancel_order(oid)
+                        self.order_manager.mark_cancelled(oid)
 
-            # Buy Trigger
-            if current_price <= row.buy_price and not self.order_manager.has_open_buy(row.row_index) and row.status != "Filled":
-                # Calculate 1% profit target from buy_price
-                profit_price = round(row.buy_price * 1.01, 2)
-                logger.info(f"Triggered BUY for row {row.row_index} at price {current_price} (buy_price: {row.buy_price})")
-                result = await self.broker.place_bracket_order(
-                    ticker=TICKER,
-                    action='BUY',
-                    qty=row.shares,
-                    limit_price=row.buy_price,
-                    profit_price=profit_price,
-                    on_fill=self._on_fill
-                )
-                if result.status == 'submitted':
-                    self.order_manager.track(row.row_index, result, 'BUY')
-                    await self.sheet.update_row_status(row.row_index, "Working")
-
-            # Sell Trigger
-            if current_price >= row.sell_price and not self.order_manager.has_open_sell(row.row_index) and row.status != "Filled":
-                # Calculate 1% profit target
-                profit_price = round(row.sell_price * 0.99, 2)
-                logger.info(f"Triggered SELL for row {row.row_index} at price {current_price} (sell_price: {row.sell_price})")
-                result = await self.broker.place_bracket_order(
-                    ticker=TICKER,
-                    action='SELL',
-                    qty=row.shares,
-                    limit_price=row.sell_price,
-                    profit_price=profit_price,
-                    on_fill=self._on_fill
-                )
-                if result.status == 'submitted':
-                    self.order_manager.track(row.row_index, result, 'SELL')
-                    await self.sheet.update_row_status(row.row_index, "Working")
+                # Update status
+                if row.has_y:
+                    new_status = f"OWNED:{owned_id}" if owned_id else "OWNED"
+                    if row.status != new_status:
+                        await self.sheet.update_row_status(row.row_index, new_status)
+                else:
+                    if row.status != "IDLE":
+                        await self.sheet.update_row_status(row.row_index, "IDLE")
 
     def _on_fill(self, fill_details: dict):
         self.last_fill_time = datetime.now()
@@ -240,7 +215,12 @@ class GridEngine:
 
         if row_index:
             # Update status in sheet
-            asyncio.create_task(self.sheet.update_row_status(row_index, "Filled"))
+            if action == 'BUY':
+                new_status = f"OWNED:{order_id}"
+            else: # SELL
+                new_status = "IDLE"
+
+            asyncio.create_task(self.sheet.update_row_status(row_index, new_status))
 
             # Prepare data for sheet logging in Fills tab
             log_data = {

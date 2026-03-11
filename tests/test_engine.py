@@ -17,7 +17,10 @@ def mock_broker():
     # mid = 100.0, spread = 0.1%
     broker.get_bid_ask = AsyncMock(return_value=(99.95, 100.05))
     broker.place_bracket_order = AsyncMock(return_value=OrderResult(order_id="ORD-P|ORD-T", status="submitted"))
+    broker.place_limit_order = AsyncMock(return_value=OrderResult(order_id="ORD-123", status="submitted"))
     broker.get_open_orders = AsyncMock(return_value=[])
+    broker.get_positions = AsyncMock(return_value={"TQQQ": 10})
+    broker.subscribe_to_fill = MagicMock()
     return broker
 
 @pytest.fixture
@@ -25,7 +28,8 @@ def mock_sheet():
     sheet = AsyncMock()
     grid_state = GridState(
         rows={
-            7: GridRow(row_index=7, status="Ready", has_y=True, sell_price=105.0, buy_price=100.0, shares=10)
+            7: GridRow(row_index=7, status="OWNED:OLD-ID", has_y=True, sell_price=105.0, buy_price=100.0, shares=10),
+            8: GridRow(row_index=8, status="IDLE", has_y=False, sell_price=110.0, buy_price=105.0, shares=10)
         }
     )
     sheet.fetch_grid = AsyncMock(return_value=grid_state)
@@ -45,70 +49,56 @@ def config():
     )
 
 @pytest.mark.asyncio
-async def test_engine_places_buy_bracket(mock_broker, mock_sheet, config):
+async def test_engine_places_sell_and_buy_limits(mock_broker, mock_sheet, config):
     engine = GridEngine(mock_broker, mock_sheet, config)
-    engine.grid_state = await mock_sheet.fetch_grid()
-    engine._last_grid_refresh = datetime.now()
+    # distal_y will be 7. Window [7, 10].
+    # Row 7 is has_y -> should place SELL.
+    # Row 8 is NOT has_y and 8 > 7 -> should place BUY.
 
-    # mid = 99.9 <= 100.0, spread = 0.2% <= 0.5%
-    mock_broker.get_bid_ask.return_value = (99.8, 100.0)
+    mock_broker.get_positions.return_value = {"TQQQ": 10} # Matches Row 7 shares
 
     await engine._tick()
 
-    mock_broker.place_bracket_order.assert_called_once()
-    # Should track both IDs
-    assert engine.order_manager.has_open_buy(7)
-    assert "ORD-P" in engine.order_manager.get_tracked_order_ids()
-    assert "ORD-T" in engine.order_manager.get_tracked_order_ids()
-    mock_sheet.update_row_status.assert_called_with(7, "Working")
+    # Should have called place_limit_order twice
+    assert mock_broker.place_limit_order.call_count == 2
+
+    # Check SELL for row 7
+    assert engine.order_manager.has_open_sell(7)
+    # Status should preserve OLD-ID: WORKING_SELL:ORD-123|OWNED:OLD-ID
+    mock_sheet.update_row_status.assert_any_call(7, "WORKING_SELL:ORD-123|OWNED:OLD-ID")
+
+    # Check BUY for row 8
+    assert engine.order_manager.has_open_buy(8)
+    mock_sheet.update_row_status.assert_any_call(8, "WORKING_BUY:ORD-123")
 
 @pytest.mark.asyncio
-async def test_overtrading_prevention_after_fill(mock_broker, mock_sheet, config):
+async def test_circuit_breaker_halts(mock_broker, mock_sheet, config):
     engine = GridEngine(mock_broker, mock_sheet, config)
-    engine.grid_state = await mock_sheet.fetch_grid()
-    engine._last_grid_refresh = datetime.now()
+    mock_broker.get_positions.return_value = {"TQQQ": 500} # Mismatch (should be 10)
 
-    # mid = 99.9, spread = 0.2%
-    mock_broker.get_bid_ask.return_value = (99.8, 100.0)
-
-    # 1. Place order
     await engine._tick()
-    assert mock_broker.place_bracket_order.call_count == 1
 
-    # 2. Parent leg fills
-    engine._on_fill({'order_id': 'ORD-P', 'price': 100.0, 'qty': 10})
-
-    # 3. Check if level is still busy (due to ORD-T)
-    assert engine.order_manager.has_open_buy(7)
-
-    # 4. Next tick should NOT place new order
-    await engine._tick()
-    assert mock_broker.place_bracket_order.call_count == 1
-
-    # 5. Take-profit leg fills
-    engine._on_fill({'order_id': 'ORD-T', 'price': 101.0, 'qty': 10})
-
-    # 6. Now level should be clear
-    assert not engine.order_manager.has_open_buy(7)
-
-    # 7. Next tick SHOULD place new order if price still in range
-    await engine._tick()
-    assert mock_broker.place_bracket_order.call_count == 2
+    # Should NOT place any orders
+    assert mock_broker.place_limit_order.call_count == 0
+    mock_sheet.log_error.assert_called()
 
 @pytest.mark.asyncio
-async def test_retrack_orphan_order(mock_broker, mock_sheet, config):
+async def test_retrack_from_status(mock_broker, mock_sheet, config):
+    # Mock row 8 as already having a working buy in status
+    grid_state = GridState(
+        rows={
+            7: GridRow(row_index=7, status="OWNED", has_y=True, sell_price=105.0, buy_price=100.0, shares=10),
+            8: GridRow(row_index=8, status="WORKING_BUY:ORD-EXISTING", has_y=False, sell_price=110.0, buy_price=105.0, shares=10)
+        }
+    )
+    mock_sheet.fetch_grid.return_value = grid_state
+    mock_broker.get_positions.return_value = {"TQQQ": 10}
+    mock_broker.get_open_orders.return_value = [{'order_id': 'ORD-EXISTING', 'limit_price': 105.0, 'qty': 10, 'action': 'BUY'}]
+
     engine = GridEngine(mock_broker, mock_sheet, config)
-    engine.grid_state = await mock_sheet.fetch_grid()
+    await engine._tick()
 
-    # Mock an orphan order at broker
-    mock_broker.get_open_orders.return_value = [{
-        'order_id': 'ORD-ORPHAN',
-        'limit_price': 100.0,
-        'qty': 10,
-        'action': 'BUY'
-    }]
-
-    await engine._reconcile_orders()
-
-    assert engine.order_manager.has_open_buy(7)
-    assert "ORD-ORPHAN" in engine.order_manager.get_tracked_order_ids()
+    # Should NOT place new order for row 8
+    # But it should be tracked now
+    assert engine.order_manager.is_tracked("ORD-EXISTING")
+    assert engine.order_manager.has_open_buy(8)

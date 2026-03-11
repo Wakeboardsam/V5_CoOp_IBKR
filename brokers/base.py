@@ -41,6 +41,17 @@ class BrokerBase(ABC):
     ) -> OrderResult: ...
 
     @abstractmethod
+    async def place_limit_order(
+        self, ticker: str, action: str,
+        qty: int, limit_price: float,
+        extended_hours: bool = True,
+        on_fill: Optional[Callable] = None
+    ) -> OrderResult: ...
+
+    @abstractmethod
+    def subscribe_to_fill(self, order_id: str, callback: Callable): ...
+
+    @abstractmethod
     async def cancel_order(self, order_id: str) -> bool: ...
 
     @abstractmethod
