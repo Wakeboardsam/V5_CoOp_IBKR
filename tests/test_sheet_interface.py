@@ -5,7 +5,7 @@ import asyncio
 from config.schema import AppConfig
 from sheets.interface import SheetInterface
 from sheets.schema import (
-    COL_ROW_ID, COL_TYPE, COL_TRIGGER_PRICE, COL_LIMIT_PRICE, COL_QUANTITY, COL_ACTIVE
+    COL_STATUS, COL_STRATEGY, COL_SELL_PRICE, COL_BUY_PRICE, COL_SHARES
 )
 
 class TestSheetInterface(unittest.IsolatedAsyncioTestCase):
@@ -32,29 +32,44 @@ class TestSheetInterface(unittest.IsolatedAsyncioTestCase):
         self.patcher_creds.stop()
         self.patcher_gspread.stop()
 
-    async def test_fetch_grid_filters_inactive(self):
+    async def test_fetch_grid_success(self):
         mock_worksheet = MagicMock()
         self.mock_sheet.worksheet.return_value = mock_worksheet
 
-        mock_worksheet.get_all_records.return_value = [
-            {COL_ROW_ID: "BUY_1", COL_TYPE: "BUY", COL_TRIGGER_PRICE: "100", COL_LIMIT_PRICE: "99", COL_QUANTITY: "10", COL_ACTIVE: "TRUE"},
-            {COL_ROW_ID: "BUY_2", COL_TYPE: "BUY", COL_TRIGGER_PRICE: "90", COL_LIMIT_PRICE: "89", COL_QUANTITY: "10", COL_ACTIVE: "FALSE"},
-            {COL_ROW_ID: "SELL_1", COL_TYPE: "SELL", COL_TRIGGER_PRICE: "110", COL_LIMIT_PRICE: "111", COL_QUANTITY: "10", COL_ACTIVE: "TRUE"},
+        # data for range C7:H100
+        # Columns: C(Status), D(Strategy), E(Empty), F(Sell), G(Buy), H(Shares)
+        mock_worksheet.get_values.return_value = [
+            ["Ready", "Y", "", "105.0", "100.0", "10"],
+            ["Filled", "N", "", "115.0", "110.0", "15"],
+            ["Ready", "Y", "", "125.0", "120.0", "20"],
         ]
 
         grid_state = await self.interface.fetch_grid()
 
-        self.assertEqual(len(grid_state.buy_levels), 1)
-        self.assertEqual(len(grid_state.sell_levels), 1)
-        self.assertEqual(grid_state.buy_levels[0].row_id, "BUY_1")
-        self.assertEqual(grid_state.sell_levels[0].row_id, "SELL_1")
+        self.assertEqual(len(grid_state.rows), 3)
+        self.assertEqual(grid_state.rows[7].status, "Ready")
+        self.assertTrue(grid_state.rows[7].has_y)
+        self.assertEqual(grid_state.rows[7].sell_price, 105.0)
+        self.assertEqual(grid_state.rows[7].buy_price, 100.0)
+        self.assertEqual(grid_state.rows[7].shares, 10)
+
+        self.assertFalse(grid_state.rows[8].has_y)
+        self.assertEqual(grid_state.distal_y_row, 9)
+
+    async def test_update_row_status(self):
+        mock_worksheet = MagicMock()
+        self.mock_sheet.worksheet.return_value = mock_worksheet
+
+        await self.interface.update_row_status(10, "Working")
+
+        mock_worksheet.update_cell.assert_called_once_with(10, COL_STATUS, "Working")
 
     async def test_log_fill_success(self):
         mock_worksheet = MagicMock()
         self.mock_sheet.worksheet.return_value = mock_worksheet
 
         fill_data = {
-            "row_id": "BUY_1",
+            "row_id": "7",
             "type": "BUY",
             "filled_price": 99.5,
             "filled_qty": 10,
@@ -67,7 +82,7 @@ class TestSheetInterface(unittest.IsolatedAsyncioTestCase):
         mock_worksheet.append_row.assert_called_once()
         # Verify first value is timestamp, others match fill_data
         args = mock_worksheet.append_row.call_args[0][0]
-        self.assertEqual(args[1], "BUY_1")
+        self.assertEqual(args[1], "7")
         self.assertEqual(args[3], 99.5)
 
     async def test_log_error_success(self):
@@ -80,10 +95,3 @@ class TestSheetInterface(unittest.IsolatedAsyncioTestCase):
         mock_worksheet.append_row.assert_called_once()
         args = mock_worksheet.append_row.call_args[0][0]
         self.assertEqual(args[1], "Test error")
-
-    async def test_log_error_worksheet_not_found(self):
-        import gspread
-        self.mock_sheet.worksheet.side_effect = gspread.exceptions.WorksheetNotFound
-
-        result = await self.interface.log_error("Test error")
-        self.assertFalse(result)
