@@ -1,15 +1,13 @@
-GRID_TAB_NAME = "Grid"
+GRID_TAB_NAME = "TQQQ_Tracker"
 FILLS_TAB_NAME = "Fills"
 HEALTH_TAB_NAME = "Health"
 
-# Grid Tab Columns
-COL_ROW_ID = "ROW_ID"
-COL_TYPE = "TYPE"
-COL_TRIGGER_PRICE = "TRIGGER_PRICE"
-COL_LIMIT_PRICE = "LIMIT_PRICE"
-COL_QUANTITY = "QUANTITY"
-COL_ACTIVE = "ACTIVE"
-COL_NOTES = "NOTES"
+# Grid Tab Columns (1-based index for gspread)
+COL_STATUS = 3        # Column C
+COL_STRATEGY = 4      # Column D - formula driven "Y"
+COL_SELL_PRICE = 6    # Column F
+COL_BUY_PRICE = 7     # Column G
+COL_SHARES = 8        # Column H
 
 # Fills Tab Columns
 COL_TIMESTAMP = "TIMESTAMP"
