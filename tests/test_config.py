@@ -22,7 +22,7 @@ def test_default_values(tmp_path):
     assert config.ibkr_host == "127.0.0.1"
     assert config.ibkr_port == 7497
     assert config.ibkr_client_id == 1
-    assert config.poll_interval_seconds == 10
+    assert config.poll_interval_seconds == 60
     assert config.max_spread_pct == 0.5
     assert config.google_sheet_id == "test_sheet_id"
     assert config.google_credentials_json == "{}"

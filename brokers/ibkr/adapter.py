@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from typing import Optional, Callable
-from ib_insync import IB, Stock, Order, Trade
+from ib_insync import IB, Stock, Order, Trade, LimitOrder
 
 from brokers.base import BrokerBase, OrderResult
 from brokers.ibkr.connection import async_connect
@@ -95,16 +95,33 @@ class IBKRAdapter(BrokerBase):
         finally:
             self.ib.cancelMktData(contract)
 
-    async def place_limit_order(self, ticker: str, action: str, qty: int, limit_price: float,
-                                 on_fill: Optional[Callable] = None) -> OrderResult:
-        """
-        Implementation of place_limit_order as requested in the PR.
-        This calls order_builder and submits via ib.placeOrder.
-        For this bot, limit orders are always brackets. We use a 1% profit target as default
-        if not otherwise specified, though usually place_bracket_order will be used.
-        """
-        profit_price = limit_price * 1.01 if action == 'BUY' else limit_price * 0.99
-        return await self.place_bracket_order(ticker, action, qty, limit_price, profit_price, on_fill=on_fill)
+    async def place_limit_order(
+        self, ticker: str, action: str,
+        qty: int, limit_price: float,
+        extended_hours: bool = True,
+        on_fill: Optional[Callable] = None
+    ) -> OrderResult:
+        from brokers.ibkr.order_builder import get_dynamic_exchange
+        exchange = get_dynamic_exchange()
+        contract = Stock(ticker, exchange, 'USD')
+        await self.ib.qualifyContractsAsync(contract)
+
+        order = LimitOrder(action, qty, limit_price)
+        order.tif = 'GTC'
+        order.outsideRth = extended_hours
+
+        self.ib.placeOrder(contract, order)
+
+        if on_fill:
+            self._on_fill_callbacks[str(order.orderId)] = on_fill
+
+        return OrderResult(
+            order_id=str(order.orderId),
+            status='submitted'
+        )
+
+    def subscribe_to_fill(self, order_id: str, callback: Callable):
+        self._on_fill_callbacks[order_id] = callback
 
     async def place_bracket_order(
         self, ticker: str, action: str,

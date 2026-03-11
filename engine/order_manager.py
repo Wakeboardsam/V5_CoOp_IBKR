@@ -60,3 +60,6 @@ class OrderManager:
 
     def get_tracked_order_ids(self) -> List[str]:
         return list(self._order_map.keys())
+
+    def is_tracked(self, order_id: str) -> bool:
+        return order_id in self._order_map
