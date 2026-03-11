@@ -27,6 +27,36 @@ class IBKRAdapter(BrokerBase):
     async def disconnect(self):
         self.ib.disconnect()
 
+    async def is_connected(self) -> bool:
+        return self.ib.isConnected()
+
+    async def ensure_connected(self):
+        if not self.is_connected():
+            logger.warning("IBKR disconnected. Watchdog attempting reconnection...")
+            # Implement exponential backoff for reconnection as requested
+            delay = 5
+            max_attempts = 5
+            for attempt in range(1, max_attempts + 1):
+                logger.info(f"Reconnection attempt {attempt}/{max_attempts}...")
+                try:
+                    # Attempt connection with a timeout to avoid hanging indefinitely
+                    await asyncio.wait_for(
+                        self.ib.connectAsync(self.host, self.port, clientId=self.client_id),
+                        timeout=30
+                    )
+                    if self.is_connected():
+                        logger.info("Watchdog successfully reconnected.")
+                        return
+                except Exception as e:
+                    logger.error(f"Reconnection attempt {attempt} failed: {e}")
+
+                if attempt < max_attempts:
+                    logger.info(f"Retrying in {delay} seconds...")
+                    await asyncio.sleep(delay)
+                    delay *= 2
+
+            raise ConnectionError(f"Watchdog failed to reconnect after {max_attempts} attempts.")
+
     async def get_price(self, ticker: str) -> float:
         # TQQQ contract is always Stock('TQQQ', 'SMART', 'USD') per instructions
         contract = Stock(ticker, 'SMART', 'USD')

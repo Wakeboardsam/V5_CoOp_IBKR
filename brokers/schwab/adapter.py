@@ -9,6 +9,12 @@ class SchwabAdapter(BrokerBase):
     async def disconnect(self):
         raise NotImplementedError
 
+    async def is_connected(self) -> bool:
+        raise NotImplementedError
+
+    async def ensure_connected(self):
+        raise NotImplementedError
+
     async def get_price(self, ticker: str) -> float:
         raise NotImplementedError
 

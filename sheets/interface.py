@@ -6,7 +6,7 @@ from google.oauth2.service_account import Credentials
 from config.schema import AppConfig
 from engine.grid_state import GridState, GridLevel
 from sheets.schema import (
-    GRID_TAB_NAME, FILLS_TAB_NAME,
+    GRID_TAB_NAME, FILLS_TAB_NAME, HEALTH_TAB_NAME,
     COL_ROW_ID, COL_TYPE, COL_TRIGGER_PRICE, COL_LIMIT_PRICE, COL_QUANTITY, COL_ACTIVE
 )
 
@@ -97,4 +97,30 @@ class SheetInterface:
             worksheet.append_row(row)
         except gspread.exceptions.WorksheetNotFound:
             # Fallback or create? For now just re-raise as per plan to not assume too much.
+            raise
+
+    async def log_health(self, health_data: dict) -> bool:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # TIMESTAMP, LAST_PRICE, OPEN_ORDERS_COUNT, LAST_FILL_TIME, STATUS
+        row = [
+            timestamp,
+            health_data.get("last_price"),
+            health_data.get("open_orders_count"),
+            health_data.get("last_fill_time"),
+            health_data.get("status")
+        ]
+
+        try:
+            await asyncio.to_thread(self._append_health_row, row)
+            return True
+        except Exception:
+            return False
+
+    def _append_health_row(self, row: list):
+        try:
+            worksheet = self._sheet.worksheet(HEALTH_TAB_NAME)
+            worksheet.append_row(row)
+        except gspread.exceptions.WorksheetNotFound:
+            # Optional: handle if Health tab doesn't exist
             raise
