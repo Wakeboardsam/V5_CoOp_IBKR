@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import signal
 from datetime import datetime
 from typing import Optional
 
@@ -24,24 +25,97 @@ class GridEngine:
         self.grid_state: Optional[GridState] = None
         self._last_grid_refresh = datetime.min
         self._last_reconciliation = datetime.min
+        self.last_price = 0.0
+        self.last_fill_time: Optional[datetime] = None
+        self._shutdown_event = asyncio.Event()
 
     async def run(self):
         logger.info("Starting GridEngine run loop")
+
+        # Setup SIGTERM handler
+        try:
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGTERM,):
+                loop.add_signal_handler(sig, self._handle_shutdown_signal)
+        except (NotImplementedError, AttributeError):
+            # signal handlers not supported (e.g. Windows)
+            logger.warning("Signal handlers not supported in this environment.")
+
         await self.broker.connect()
 
+        # Start periodic tasks
+        health_task = asyncio.create_task(self._log_health_periodic())
+
         try:
-            while True:
+            while not self._shutdown_event.is_set():
                 try:
                     await self._tick()
                 except Exception as e:
                     logger.error(f"Error in engine tick: {e}", exc_info=True)
                     await self.sheet.log_error(f"Engine tick error: {str(e)}")
 
-                await asyncio.sleep(self.config.poll_interval_seconds)
+                # Wait for poll interval or shutdown signal
+                try:
+                    await asyncio.wait_for(self._shutdown_event.wait(), timeout=self.config.poll_interval_seconds)
+                except asyncio.TimeoutError:
+                    pass
+
+            logger.info("Exiting run loop. Starting cleanup...")
         finally:
+            # 1. Cancel health task
+            health_task.cancel()
+            try:
+                await health_task
+            except asyncio.CancelledError:
+                pass
+
+            # 2. Cancel all open GTC orders placed by this session
+            await self._cancel_all_orders()
+
+            # 3. Disconnect broker
             await self.broker.disconnect()
+            logger.info("Graceful shutdown complete.")
+
+    def _handle_shutdown_signal(self):
+        logger.info("Shutdown signal received.")
+        self._shutdown_event.set()
+
+    async def _cancel_all_orders(self):
+        tracked_ids = self.order_manager.get_tracked_order_ids()
+        if tracked_ids:
+            logger.info(f"Cancelling {len(tracked_ids)} tracked orders...")
+            for oid in tracked_ids:
+                success = await self.broker.cancel_order(oid)
+                if success:
+                    logger.info(f"Cancelled order: {oid}")
+                else:
+                    logger.warning(f"Failed to cancel order: {oid}")
+
+    async def _log_health_periodic(self):
+        while not self._shutdown_event.is_set():
+            try:
+                open_orders = await self.broker.get_open_orders()
+                health_data = {
+                    "last_price": self.last_price,
+                    "open_orders_count": len(open_orders),
+                    "last_fill_time": self.last_fill_time.strftime("%Y-%m-%d %H:%M:%S") if self.last_fill_time else "Never",
+                    "status": "Running"
+                }
+                await self.sheet.log_health(health_data)
+                logger.info("Health status logged to Google Sheets")
+            except Exception as e:
+                logger.error(f"Failed to log health status: {e}")
+
+            # Wait 5 minutes or until shutdown
+            try:
+                await asyncio.wait_for(self._shutdown_event.wait(), timeout=300)
+            except asyncio.TimeoutError:
+                pass
 
     async def _tick(self):
+        # 0. Watchdog: ensure connection
+        await self.broker.ensure_connected()
+
         # 1. Refresh grid periodically
         if (datetime.now() - self._last_grid_refresh).total_seconds() > 900: # 15 mins
             logger.info("Refreshing grid state from sheet")
@@ -60,6 +134,7 @@ class GridEngine:
         try:
             bid, ask = await self.broker.get_bid_ask(TICKER)
             price = (bid + ask) / 2 # Use mid-price for trigger check
+            self.last_price = price
         except Exception as e:
             logger.warning(f"Failed to get market data: {e}")
             return
@@ -147,6 +222,7 @@ class GridEngine:
                     self.order_manager.track(level.row_id, result, 'SELL')
 
     def _on_fill(self, fill_details: dict):
+        self.last_fill_time = datetime.now()
         order_id = fill_details.get('order_id')
         row_id, action = self.order_manager.mark_filled(order_id)
 

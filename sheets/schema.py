@@ -1,5 +1,6 @@
 GRID_TAB_NAME = "Grid"
 FILLS_TAB_NAME = "Fills"
+HEALTH_TAB_NAME = "Health"
 
 # Grid Tab Columns
 COL_ROW_ID = "ROW_ID"
