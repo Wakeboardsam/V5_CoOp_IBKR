@@ -1,0 +1,1205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TQQQ Grid Bot v5 — IBKR Engineering Master Plan</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700;900&family=Barlow:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #090c10;
+    --panel: #0d1117;
+    --panel2: #111820;
+    --border: #1e2d3d;
+    --accent: #00e5ff;
+    --accent2: #39ff14;
+    --accent3: #ff6b35;
+    --warn: #ffd93d;
+    --text: #c9d1d9;
+    --muted: #586069;
+    --heading: #e6edf3;
+    --mono: 'Share Tech Mono', monospace;
+    --display: 'Barlow Condensed', sans-serif;
+    --body: 'Barlow', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--body);
+    font-size: 15px;
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,229,255,0.012) 2px,
+      rgba(0,229,255,0.012) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  .hero {
+    background: linear-gradient(135deg, #090c10 0%, #0a1628 50%, #090c10 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 60px 60px 50px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hero::after {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -10%;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(0,229,255,0.04) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .hero-tag {
+    font-family: var(--mono);
+    color: var(--accent);
+    font-size: 11px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    opacity: 0.8;
+  }
+
+  .hero h1 {
+    font-family: var(--display);
+    font-weight: 900;
+    font-size: 72px;
+    line-height: 0.95;
+    color: var(--heading);
+    letter-spacing: -1px;
+    margin-bottom: 8px;
+  }
+
+  .hero h1 span { color: var(--accent); }
+
+  .hero-sub {
+    font-family: var(--display);
+    font-weight: 300;
+    font-size: 22px;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 32px;
+  }
+
+  .badge-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 4px 12px;
+    border-radius: 2px;
+    letter-spacing: 1px;
+  }
+  .badge-blue  { background: rgba(0,229,255,0.1);  color: var(--accent);  border: 1px solid rgba(0,229,255,0.3); }
+  .badge-green { background: rgba(57,255,20,0.08); color: var(--accent2); border: 1px solid rgba(57,255,20,0.25); }
+  .badge-orange{ background: rgba(255,107,53,0.1); color: var(--accent3); border: 1px solid rgba(255,107,53,0.3); }
+  .badge-warn  { background: rgba(255,217,61,0.08);color: var(--warn);    border: 1px solid rgba(255,217,61,0.25); }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 60px; }
+
+  /* TOC */
+  .toc {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    margin: 40px 60px;
+    padding: 28px 36px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 40px;
+  }
+
+  .toc-title {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+    grid-column: 1/-1;
+  }
+
+  .toc a {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    text-decoration: none;
+    padding: 3px 0;
+    border-bottom: 1px solid transparent;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .toc a:hover { color: var(--accent); border-color: rgba(0,229,255,0.3); }
+  .toc a span { color: var(--accent); margin-right: 8px; }
+
+  /* Sections */
+  section { padding: 48px 60px 0; }
+
+  .section-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--accent);
+    opacity: 0.7;
+    margin-bottom: 8px;
+  }
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: 38px;
+    color: var(--heading);
+    line-height: 1;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  h3 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 20px;
+    color: var(--heading);
+    margin: 28px 0 12px;
+    letter-spacing: 0.5px;
+  }
+
+  h3::before {
+    content: '▶ ';
+    color: var(--accent);
+    font-size: 12px;
+  }
+
+  p { margin-bottom: 14px; color: var(--text); }
+
+  /* Callout boxes */
+  .callout {
+    border-radius: 3px;
+    padding: 18px 22px;
+    margin: 20px 0;
+    border-left: 3px solid;
+    font-size: 14px;
+  }
+  .callout-info   { background: rgba(0,229,255,0.05);  border-color: var(--accent);  }
+  .callout-success{ background: rgba(57,255,20,0.05);  border-color: var(--accent2); }
+  .callout-warn   { background: rgba(255,217,61,0.05); border-color: var(--warn);    }
+  .callout-danger { background: rgba(255,107,53,0.06); border-color: var(--accent3); }
+
+  .callout strong {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 6px;
+  }
+  .callout-info   strong { color: var(--accent);  }
+  .callout-success strong{ color: var(--accent2); }
+  .callout-warn   strong { color: var(--warn);    }
+  .callout-danger strong { color: var(--accent3); }
+
+  /* Code blocks */
+  pre {
+    background: #060a0e;
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+    padding: 20px 24px;
+    overflow-x: auto;
+    margin: 16px 0;
+    position: relative;
+  }
+
+  pre .pre-label {
+    position: absolute;
+    top: 0;
+    right: 16px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    padding: 3px 8px;
+    background: var(--accent);
+    color: #000;
+    font-weight: bold;
+    transform: translateY(-1px);
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: #a8d8ff;
+    line-height: 1.8;
+  }
+
+  code .kw  { color: var(--accent);  }
+  code .str { color: var(--accent2); }
+  code .cm  { color: var(--muted);   }
+  code .cls { color: var(--warn);    }
+  code .fn  { color: #d2a8ff;        }
+  code .num { color: var(--accent3); }
+
+  /* Architecture diagram */
+  .arch-diagram {
+    background: #060a0e;
+    border: 1px solid var(--border);
+    padding: 36px;
+    margin: 24px 0;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 2;
+    overflow-x: auto;
+  }
+
+  .arch-diagram .layer {
+    border: 1px solid var(--border);
+    padding: 10px 18px;
+    margin: 6px 0;
+    position: relative;
+  }
+
+  .arch-box {
+    display: inline-block;
+    border: 1px solid;
+    padding: 6px 16px;
+    margin: 4px;
+    font-size: 12px;
+    letter-spacing: 1px;
+  }
+  .box-blue   { border-color: var(--accent);  color: var(--accent);  background: rgba(0,229,255,0.06); }
+  .box-green  { border-color: var(--accent2); color: var(--accent2); background: rgba(57,255,20,0.05); }
+  .box-orange { border-color: var(--accent3); color: var(--accent3); background: rgba(255,107,53,0.06);}
+  .box-yellow { border-color: var(--warn);    color: var(--warn);    background: rgba(255,217,61,0.05);}
+  .box-muted  { border-color: var(--border);  color: var(--muted);   background: rgba(255,255,255,0.02);}
+
+  .arch-arrow {
+    display: block;
+    text-align: center;
+    color: var(--muted);
+    font-size: 18px;
+    line-height: 1.4;
+  }
+
+  .layer-label {
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  /* File tree */
+  .filetree {
+    background: #060a0e;
+    border: 1px solid var(--border);
+    padding: 24px;
+    margin: 16px 0;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 2;
+  }
+
+  .filetree .dir  { color: var(--accent); }
+  .filetree .file { color: var(--text);   }
+  .filetree .note { color: var(--muted); font-size: 11px; }
+
+  /* Phase cards */
+  .phase-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin: 24px 0;
+  }
+
+  .phase-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 22px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .phase-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+  .phase-card.p1::before { background: var(--accent); }
+  .phase-card.p2::before { background: var(--accent2); }
+  .phase-card.p3::before { background: var(--warn); }
+  .phase-card.p4::before { background: var(--accent3); }
+  .phase-card.p5::before { background: #d2a8ff; }
+  .phase-card.p6::before { background: var(--muted); }
+
+  .phase-num {
+    font-family: var(--display);
+    font-weight: 900;
+    font-size: 56px;
+    line-height: 1;
+    opacity: 0.08;
+    position: absolute;
+    top: 10px;
+    right: 14px;
+    color: white;
+  }
+
+  .phase-card h4 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--heading);
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+  }
+
+  .phase-card p {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  /* PR Prompt blocks */
+  .pr-block {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-left: 3px solid #d2a8ff;
+    margin: 20px 0;
+    overflow: hidden;
+  }
+
+  .pr-header {
+    background: rgba(210,168,255,0.07);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .pr-num {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: #d2a8ff;
+    background: rgba(210,168,255,0.12);
+    padding: 3px 10px;
+    border-radius: 2px;
+  }
+
+  .pr-title {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--heading);
+  }
+
+  .pr-body {
+    padding: 16px 20px;
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  .pr-body ul {
+    padding-left: 20px;
+    margin: 8px 0;
+  }
+
+  .pr-body li {
+    margin: 4px 0;
+    color: var(--muted);
+  }
+
+  .pr-body li strong { color: var(--text); }
+
+  /* Table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 13px;
+  }
+
+  th {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: rgba(0,229,255,0.05);
+    padding: 10px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+
+  td {
+    padding: 10px 16px;
+    border-bottom: 1px solid rgba(30,45,61,0.5);
+    color: var(--text);
+    vertical-align: top;
+  }
+
+  td code {
+    font-size: 12px;
+    background: rgba(0,229,255,0.07);
+    padding: 2px 6px;
+    color: var(--accent);
+  }
+
+  tr:hover td { background: rgba(255,255,255,0.015); }
+
+  /* Divider */
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 48px 60px 0;
+  }
+
+  /* Footer */
+  footer {
+    padding: 40px 60px;
+    border-top: 1px solid var(--border);
+    margin-top: 60px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  footer .f-left {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 2;
+  }
+
+  footer .f-right {
+    font-family: var(--display);
+    font-weight: 900;
+    font-size: 32px;
+    color: var(--border);
+    letter-spacing: 2px;
+  }
+
+  /* Inline code */
+  p code, li code, td code {
+    font-size: 12px;
+    background: rgba(0,229,255,0.07);
+    padding: 2px 6px;
+    color: var(--accent);
+    border-radius: 2px;
+  }
+
+  ul { padding-left: 22px; margin-bottom: 14px; }
+  li { margin: 5px 0; }
+
+  @media (max-width: 768px) {
+    .hero, section, .toc, .divider, footer { padding-left: 24px; padding-right: 24px; }
+    .hero h1 { font-size: 42px; }
+    .phase-grid { grid-template-columns: 1fr; }
+    .toc { grid-template-columns: 1fr; margin: 24px; }
+    footer { flex-direction: column; gap: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-tag">// engineering master plan · revision 1.0</div>
+  <h1>TQQQ GRID BOT <span>V5</span></h1>
+  <div class="hero-sub">IBKR API · Home Assistant Addon · Google Sheets Engine</div>
+  <div class="badge-row">
+    <span class="badge badge-blue">IBKR Paper Trading</span>
+    <span class="badge badge-green">ib_insync + asyncio</span>
+    <span class="badge badge-orange">Docker / HA Addon</span>
+    <span class="badge badge-warn">Broker-Sandboxed</span>
+    <span class="badge badge-blue">Google Sheets Source of Truth</span>
+    <span class="badge badge-green">Extended Hours Trading</span>
+  </div>
+</div>
+
+<!-- TABLE OF CONTENTS -->
+<nav class="toc">
+  <div class="toc-title">// Table of Contents</div>
+  <a href="#overview"><span>01</span> Project Overview & Decisions</a>
+  <a href="#architecture"><span>02</span> System Architecture</a>
+  <a href="#filestructure"><span>03</span> Repository File Structure</a>
+  <a href="#modules"><span>04</span> Module Specifications</a>
+  <a href="#phases"><span>05</span> Build Phases</a>
+  <a href="#pr-prompts"><span>06</span> Jules PR Prompt Blocks</a>
+  <a href="#config"><span>07</span> Configuration Reference</a>
+  <a href="#docker"><span>08</span> Docker & HA Addon Setup</a>
+  <a href="#sheets"><span>09</span> Google Sheet Schema</a>
+  <a href="#trading"><span>10</span> Trading Logic & Extended Hours</a>
+  <a href="#testing"><span>11</span> Paper Trading & Testing Protocol</a>
+  <a href="#broker-swap"><span>12</span> Broker Swap Guide</a>
+</nav>
+
+
+<!-- SECTION 1 -->
+<section id="overview">
+  <div class="section-label">// 01</div>
+  <h2>Project Overview & Decisions</h2>
+
+  <p>This document is the authoritative engineering specification for TQQQ Grid Bot v5. It is written to be passed directly to <strong>Google Jules</strong> as a series of structured pull request prompts. All architectural decisions are locked in below — Jules should not improvise on structure.</p>
+
+  <div class="callout callout-success">
+    <strong>✓ Architecture Decisions — Locked</strong>
+    All decisions below are confirmed and final. Jules should implement exactly as specified.
+  </div>
+
+  <h3>Decision 1: IBKR Connectivity via ib_insync</h3>
+  <p>The bot connects to IBKR using <code>ib_insync</code>, a modern async-friendly Python wrapper around IBKR's official <code>ibapi</code>. It connects to a locally-running <strong>IB Gateway</strong> process (not TWS). The Gateway runs as a headless Java process inside the same Docker container, auto-logged in by <strong>IBC</strong> (IB Controller). This avoids any GUI requirement and is fully compatible with headless Docker environments.</p>
+
+  <h3>Decision 2: Google Sheets as Source of Truth</h3>
+  <p>The trading grid — buy prices, sell prices, and share quantities — lives entirely in a Google Sheet. The bot reads this sheet at startup and periodically to refresh the grid. It never writes its own prices or quantities. Only trade confirmation logs are written back to the sheet.</p>
+
+  <h3>Decision 3: Broker Sandbox Pattern</h3>
+  <p>All broker-specific code lives in <code>brokers/ibkr/adapter.py</code>. A base class <code>brokers/base.py</code> defines the interface. Switching to a new broker means only adding a new folder under <code>brokers/</code> and changing <code>active_broker</code> in <code>options.json</code>. Zero changes to engine logic.</p>
+
+  <h3>Decision 4: Paper Trading First</h3>
+  <p>IBKR provides a full paper trading environment at <code>localhost:7497</code> (vs live at <code>7496</code>). The <code>options.json</code> flag <code>"paper_trading": true</code> toggles between them. All initial development and testing MUST use paper mode.</p>
+
+  <h3>Decision 5: Extended Hours</h3>
+  <p>TQQQ trades during extended hours (pre-market 4:00 AM–9:30 AM ET, after-hours 4:00 PM–8:00 PM ET). IBKR supports this via the <code>outsideRth=True</code> order flag. The bot will trade in these windows. TQQQ does NOT trade overnight (midnight–4 AM), so no futures are needed.</p>
+
+  <div class="callout callout-warn">
+    <strong>⚠ TQQQ Extended Hours Reality Check</strong>
+    Pre-market liquidity on TQQQ can be thin with wide spreads. The grid logic must include a configurable <code>max_spread_pct</code> guard that skips order placement if the bid-ask spread exceeds threshold. Default: <code>0.5%</code>.
+  </div>
+
+  <h3>Decision 6: Home Assistant Addon Constraints</h3>
+  <p>The bot runs as a Home Assistant Addon — a Docker container managed by HA's Supervisor. The filesystem is ephemeral. All persistent config comes via <code>options.json</code> (HA's addon options). All code changes are deployed via GitHub. The container runs <code>supervisord</code> to manage both the IB Gateway process and the Python bot process simultaneously.</p>
+</section>
+
+<hr class="divider">
+
+<!-- SECTION 2 -->
+<section id="architecture">
+  <div class="section-label">// 02</div>
+  <h2>System Architecture</h2>
+
+  <div class="arch-diagram">
+    <div class="layer-label">// EXTERNAL WORLD</div>
+    <div class="layer" style="border-color: rgba(57,255,20,0.2);">
+      <span class="arch-box box-green">IBKR Servers (Paper)</span>
+      <span class="arch-box box-green">IBKR Servers (Live)</span>
+      <span class="arch-box box-yellow">Google Sheets API</span>
+    </div>
+
+    <span class="arch-arrow">↕ HTTPS / IBKR Encrypted Socket</span>
+
+    <div class="layer-label">// DOCKER CONTAINER (Home Assistant Addon)</div>
+    <div class="layer" style="border-color: rgba(0,229,255,0.2); padding: 20px;">
+      <div class="layer-label">managed by supervisord</div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px;">
+        <div class="layer" style="border-color: rgba(255,107,53,0.3);">
+          <div class="layer-label">PROCESS 1</div>
+          <span class="arch-box box-orange">IB Gateway (Java)</span><br>
+          <span class="arch-box box-muted">IBC Headless Login</span><br>
+          <small style="color:var(--muted)">localhost:7497 (paper)<br>localhost:7496 (live)</small>
+        </div>
+        <div class="layer" style="border-color: rgba(0,229,255,0.3);">
+          <div class="layer-label">PROCESS 2</div>
+          <span class="arch-box box-blue">main.py (asyncio)</span><br>
+          <span class="arch-box box-blue">Engine</span>
+          <span class="arch-box box-blue">SheetInterface</span><br>
+          <span class="arch-box box-blue">IBKRAdapter</span>
+        </div>
+      </div>
+    </div>
+
+    <span class="arch-arrow">↕ local socket (ib_insync)</span>
+
+    <div class="layer-label">// DATA FLOW</div>
+    <div class="layer" style="border-color: rgba(255,217,61,0.2);">
+      <span class="arch-box box-yellow">options.json</span>
+      <span style="color:var(--muted)">→</span>
+      <span class="arch-box box-blue">Config Loader</span>
+      <span style="color:var(--muted)">→</span>
+      <span class="arch-box box-blue">Engine boots correct BrokerAdapter</span>
+      <span style="color:var(--muted)">→</span>
+      <span class="arch-box box-yellow">Google Sheet Grid</span>
+    </div>
+  </div>
+
+  <h3>Data Flow Summary</h3>
+  <ul>
+    <li><strong>Startup:</strong> Supervisord starts IB Gateway → waits for port → starts Python bot</li>
+    <li><strong>Boot:</strong> Config loaded from <code>options.json</code> → SheetInterface fetches grid → IBKRAdapter connects</li>
+    <li><strong>Tick Loop:</strong> Every N seconds, fetch TQQQ market price → compare against grid → place/cancel orders as needed</li>
+    <li><strong>Order Fills:</strong> IBKR pushes fill events → Engine logs to Google Sheet → grid state updated</li>
+    <li><strong>Extended Hours:</strong> <code>outsideRth=True</code> on all limit orders — active 4AM–8PM ET</li>
+  </ul>
+</section>
+
+<hr class="divider">
+
+<!-- SECTION 3 -->
+<section id="filestructure">
+  <div class="section-label">// 03</div>
+  <h2>Repository File Structure</h2>
+
+  <div class="filetree">
+<span class="dir">tqqq-bot-v5/</span>
+├── <span class="dir">brokers/</span>                         <span class="note"># Broker sandbox — add new brokers here</span>
+│   ├── <span class="file">base.py</span>                      <span class="note"># BrokerBase abstract class (interface contract)</span>
+│   ├── <span class="dir">ibkr/</span>
+│   │   ├── <span class="file">__init__.py</span>
+│   │   ├── <span class="file">adapter.py</span>               <span class="note"># IBKRAdapter(BrokerBase) — all IBKR logic here</span>
+│   │   ├── <span class="file">connection.py</span>            <span class="note"># ib_insync connect/reconnect with backoff</span>
+│   │   └── <span class="file">order_builder.py</span>         <span class="note"># Build IBKR LimitOrder objects with outsideRth</span>
+│   └── <span class="dir">schwab/</span>                      <span class="note"># Preserved from v4, untouched</span>
+│       ├── <span class="file">__init__.py</span>
+│       └── <span class="file">adapter.py</span>               <span class="note"># SchwabAdapter(BrokerBase) — existing v4 code</span>
+│
+├── <span class="dir">engine/</span>
+│   ├── <span class="file">__init__.py</span>
+│   ├── <span class="file">engine.py</span>                    <span class="note"># Core grid trading loop (broker-agnostic)</span>
+│   ├── <span class="file">grid_state.py</span>               <span class="note"># In-memory grid: buy/sell levels, fill tracking</span>
+│   ├── <span class="file">order_manager.py</span>            <span class="note"># Tracks open orders, deduplication, GTC logic</span>
+│   └── <span class="file">spread_guard.py</span>             <span class="note"># Bid-ask spread check before order placement</span>
+│
+├── <span class="dir">sheets/</span>
+│   ├── <span class="file">__init__.py</span>
+│   ├── <span class="file">interface.py</span>                 <span class="note"># SheetInterface — read grid, write fills</span>
+│   └── <span class="file">schema.py</span>                    <span class="note"># Column index constants, validation</span>
+│
+├── <span class="dir">config/</span>
+│   ├── <span class="file">loader.py</span>                    <span class="note"># Reads options.json, validates, exposes Config obj</span>
+│   └── <span class="file">schema.py</span>                    <span class="note"># Pydantic config schema with defaults</span>
+│
+├── <span class="dir">gateway/</span>                         <span class="note"># IB Gateway management (runtime, not shipped to IBKR)</span>
+│   ├── <span class="file">ibc_config.ini.template</span>     <span class="note"># IBC config template (filled at runtime from options)</span>
+│   └── <span class="file">wait_for_gateway.py</span>          <span class="note"># Polls localhost:7497 until Gateway is ready</span>
+│
+├── <span class="dir">tests/</span>
+│   ├── <span class="file">test_engine.py</span>
+│   ├── <span class="file">test_grid_state.py</span>
+│   ├── <span class="file">test_ibkr_adapter.py</span>         <span class="note"># Uses ib_insync mock</span>
+│   └── <span class="file">test_sheet_interface.py</span>
+│
+├── <span class="dir">addon/</span>                           <span class="note"># Home Assistant Addon specific files</span>
+│   ├── <span class="file">config.yaml</span>                  <span class="note"># HA Addon manifest</span>
+│   ├── <span class="file">Dockerfile</span>
+│   ├── <span class="file">supervisord.conf</span>             <span class="note"># Manages IBGateway + Python bot processes</span>
+│   ├── <span class="file">run.sh</span>                       <span class="note"># Entrypoint: renders IBC config → starts supervisord</span>
+│   └── <span class="file">options.schema.json</span>          <span class="note"># HA UI schema for options.json</span>
+│
+├── <span class="file">main.py</span>                          <span class="note"># Entry point — reads config, boots engine</span>
+├── <span class="file">requirements.txt</span>
+└── <span class="file">README.md</span>
+  </div>
+
+  <div class="callout callout-info">
+    <strong>ℹ Broker Swap Rule</strong>
+    Only <code>brokers/</code> and <code>options.json → active_broker</code> ever change between brokers. The <code>engine/</code>, <code>sheets/</code>, and <code>config/</code> directories are 100% broker-agnostic.
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- SECTION 4 -->
+<section id="modules">
+  <div class="section-label">// 04</div>
+  <h2>Module Specifications</h2>
+
+  <h3>brokers/base.py — BrokerBase</h3>
+  <pre><code><span class="cm"># brokers/base.py — NEVER modify this file for broker-specific logic</span>
+<span class="kw">from</span> abc <span class="kw">import</span> ABC, abstractmethod
+<span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass
+<span class="kw">from</span> typing <span class="kw">import</span> Optional, Callable
+
+<span class="kw">@dataclass</span>
+<span class="kw">class</span> <span class="cls">OrderResult</span>:
+    order_id: str
+    status: str          <span class="cm"># 'submitted' | 'filled' | 'cancelled' | 'error'</span>
+    filled_price: Optional[float] = None
+    filled_qty:   Optional[int]   = None
+    error_msg:    Optional[str]   = None
+
+<span class="kw">class</span> <span class="cls">BrokerBase</span>(ABC):
+
+    <span class="kw">@abstractmethod</span>
+    <span class="kw">async def</span> <span class="fn">connect</span>(self) -> bool: ...
+
+    <span class="kw">@abstractmethod</span>
+    <span class="kw">async def</span> <span class="fn">disconnect</span>(self): ...
+
+    <span class="kw">@abstractmethod</span>
+    <span class="kw">async def</span> <span class="fn">get_price</span>(self, ticker: str) -> float: ...
+
+    <span class="kw">@abstractmethod</span>
+    <span class="kw">async def</span> <span class="fn">get_bid_ask</span>(self, ticker: str) -> tuple[float, float]: ...
+
+    <span class="kw">@abstractmethod</span>
+    <span class="kw">async def</span> <span class="fn">place_bracket_order</span>(
+        self, ticker: str, action: str,  <span class="cm"># 'BUY' | 'SELL'</span>
+        qty: int, limit_price: float, profit_price: float,
+        extended_hours: bool = True,
+        on_fill: Optional[Callable] = None
+    ) -> <span class="cls">OrderResult</span>: ...
+
+    <span class="kw">@abstractmethod</span>
+    <span class="kw">async def</span> <span class="fn">cancel_order</span>(self, order_id: str) -> bool: ...
+
+    <span class="kw">@abstractmethod</span>
+    <span class="kw">async def</span> <span class="fn">get_open_orders</span>(self) -> list[dict]: ...
+
+    <span class="kw">@abstractmethod</span>
+    <span class="kw">async def</span> <span class="fn">get_positions</span>(self) -> dict[str, int]: ...
+<div class="pre-label">base.py</div></code></pre>
+
+  <h3>brokers/ibkr/adapter.py — IBKRAdapter</h3>
+  <pre><code><span class="cm"># Key implementation notes for Jules:</span>
+<span class="cm"># - Uses ib_insync.IB() as the connection object</span>
+<span class="cm"># - All methods are async (ib_insync supports asyncio natively)</span>
+<span class="cm"># - Paper port: 7497, Live port: 7496 (from config)</span>
+<span class="cm"># - clientId: unique int per connection (use config value, default 1)</span>
+<span class="cm"># - TQQQ contract: Stock('TQQQ', 'SMART', 'USD')</span>
+<span class="cm"># - All limit orders must set order.outsideRth = True</span>
+<span class="cm"># - All limit orders must set order.tif = 'GTC' (Good Till Cancelled)</span>
+<span class="cm"># - Reconnect logic: exponential backoff, max 10 retries</span>
+<span class="cm"># - Fill callback: subscribe to ib.orderStatusEvent</span>
+
+<span class="kw">from</span> ib_insync <span class="kw">import</span> IB, Stock, LimitOrder
+<span class="kw">from</span> brokers.base <span class="kw">import</span> BrokerBase, OrderResult
+
+<span class="kw">class</span> <span class="cls">IBKRAdapter</span>(<span class="cls">BrokerBase</span>):
+    <span class="kw">def</span> <span class="fn">__init__</span>(self, host: str, port: int, client_id: int, paper: bool):
+        self.host = host
+        self.port = port          <span class="cm"># 7497=paper, 7496=live</span>
+        self.client_id = client_id
+        self.paper = paper
+        self.ib = IB()
+        self._contract = Stock(<span class="str">'TQQQ'</span>, <span class="str">'SMART'</span>, <span class="str">'USD'</span>)
+<div class="pre-label">adapter.py</div></code></pre>
+
+  <h3>engine/engine.py — Core Loop</h3>
+  <p>The engine is entirely broker-agnostic. It receives a <code>BrokerBase</code> instance and a <code>GridState</code> loaded from Google Sheets. Its only job is to compare current price against the grid and call broker methods.</p>
+
+  <pre><code><span class="cm"># engine.py pseudo-logic for Jules to implement:</span>
+<span class="cm">#</span>
+<span class="cm"># async def run_loop():</span>
+<span class="cm">#   while True:</span>
+<span class="cm">#     price = await broker.get_price('TQQQ')</span>
+<span class="cm">#     bid, ask = await broker.get_bid_ask('TQQQ')</span>
+<span class="cm">#</span>
+<span class="cm">#     if spread_guard.is_too_wide(bid, ask):  # skip if spread > max_spread_pct</span>
+<span class="cm">#       await asyncio.sleep(config.poll_interval)</span>
+<span class="cm">#       continue</span>
+<span class="cm">#</span>
+<span class="cm">#     for level in grid_state.buy_levels:</span>
+<span class="cm">#       if price <= level.trigger_price and not order_manager.has_open_buy(level):</span>
+<span class="cm">#         result = await broker.place_limit_order('TQQQ', 'BUY', level.qty,</span>
+<span class="cm">#                   level.limit_price, extended_hours=True)</span>
+<span class="cm">#         order_manager.track(level, result)</span>
+<span class="cm">#</span>
+<span class="cm">#     for level in grid_state.sell_levels:</span>
+<span class="cm">#       if price >= level.trigger_price and not order_manager.has_open_sell(level):</span>
+<span class="cm">#         result = await broker.place_limit_order('TQQQ', 'SELL', level.qty,</span>
+<span class="cm">#                   level.limit_price, extended_hours=True)</span>
+<span class="cm">#         order_manager.track(level, result)</span>
+<span class="cm">#</span>
+<span class="cm">#     await asyncio.sleep(config.poll_interval)</span>
+<div class="pre-label">engine.py</div></code></pre>
+
+  <h3>sheets/interface.py — SheetInterface</h3>
+  <table>
+    <thead><tr><th>Method</th><th>Description</th><th>Returns</th></tr></thead>
+    <tbody>
+      <tr><td><code>fetch_grid()</code></td><td>Reads all buy/sell levels from sheet tab "Grid"</td><td><code>GridState</code></td></tr>
+      <tr><td><code>log_fill(fill)</code></td><td>Appends fill record to sheet tab "Fills"</td><td><code>bool</code></td></tr>
+      <tr><td><code>log_error(err)</code></td><td>Appends error to sheet tab "Errors"</td><td><code>bool</code></td></tr>
+      <tr><td><code>refresh_grid()</code></td><td>Re-fetches grid (called every N minutes)</td><td><code>GridState</code></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<hr class="divider">
+
+<!-- SECTION 5 -->
+<section id="phases">
+  <div class="section-label">// 05</div>
+  <h2>Build Phases</h2>
+
+  <div class="phase-grid">
+    <div class="phase-card p1">
+      <div class="phase-num">1</div>
+      <h4>Scaffold & Base Classes</h4>
+      <p>Repo structure, BrokerBase, Config schema, requirements.txt, blank adapters with NotImplemented stubs</p>
+    </div>
+    <div class="phase-card p2">
+      <div class="phase-num">2</div>
+      <h4>Google Sheets Interface</h4>
+      <p>SheetInterface with gspread, schema constants, fetch_grid(), log_fill(), unit tests with mock sheet</p>
+    </div>
+    <div class="phase-card p3">
+      <div class="phase-num">3</div>
+      <h4>IBKR Adapter (Paper)</h4>
+      <p>IBKRAdapter connecting to port 7497, get_price, get_bid_ask, place_limit_order with outsideRth+GTC</p>
+    </div>
+    <div class="phase-card p4">
+      <div class="phase-num">4</div>
+      <h4>Engine Logic</h4>
+      <p>GridState, OrderManager, SpreadGuard, core run_loop, fill callbacks writing back to Sheets</p>
+    </div>
+    <div class="phase-card p5">
+      <div class="phase-num">5</div>
+      <h4>Docker & HA Addon</h4>
+      <p>Dockerfile with IB Gateway + IBC, supervisord.conf, run.sh entrypoint, options.schema.json, config.yaml</p>
+    </div>
+    <div class="phase-card p6">
+      <div class="phase-num">6</div>
+      <h4>Paper Testing & Hardening</h4>
+      <p>Full paper trading run, reconnect stress test, spread guard validation, fill logging audit, go-live checklist</p>
+    </div>
+  </div>
+
+  <div class="callout callout-danger">
+    <strong>🚫 Hard Rule: Do Not Skip Phase Order</strong>
+    Each PR must pass its stated tests before the next PR is opened. Jules should not implement Phase 4 logic until Phase 3's adapter is confirmed connecting to IBKR Paper Trading and returning real quotes.
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- SECTION 6 -->
+<section id="pr-prompts">
+  <div class="section-label">// 06</div>
+  <h2>Jules PR Prompt Blocks</h2>
+
+  <p>Copy each block below verbatim into Jules. Wait for the PR, review it here, then merge before proceeding to the next block.</p>
+
+  <!-- PR 1 -->
+  <div class="pr-block">
+    <div class="pr-header">
+      <span class="pr-num">PR-01</span>
+      <span class="pr-title">Repository Scaffold, BrokerBase, Config Schema</span>
+    </div>
+    <div class="pr-body">
+      <p><strong>Prompt to paste into Jules:</strong></p>
+      <p>Create the initial project scaffold for a Python asyncio trading bot with the following exact file structure. Use Python 3.11+.</p>
+      <ul>
+        <li>Create <strong>brokers/base.py</strong> with a <code>BrokerBase</code> ABC and <code>OrderResult</code> dataclass exactly as specified in the engineering doc. All methods are async and abstract.</li>
+        <li>Create <strong>brokers/ibkr/__init__.py</strong> and <strong>brokers/ibkr/adapter.py</strong> with an <code>IBKRAdapter(BrokerBase)</code> class. All methods raise <code>NotImplementedError</code> for now (stubs only).</li>
+        <li>Create <strong>brokers/schwab/__init__.py</strong> and <strong>brokers/schwab/adapter.py</strong> with a <code>SchwabAdapter(BrokerBase)</code> class. All methods raise <code>NotImplementedError</code> for now.</li>
+        <li>Create <strong>config/schema.py</strong> using Pydantic v2 with fields: <code>active_broker: str</code> (default "ibkr"), <code>paper_trading: bool</code> (default True), <code>ibkr_host: str</code> (default "127.0.0.1"), <code>ibkr_port: int</code> (default 7497), <code>ibkr_client_id: int</code> (default 1), <code>poll_interval_seconds: int</code> (default 10), <code>max_spread_pct: float</code> (default 0.5), <code>google_sheet_id: str</code>, <code>google_credentials_json: str</code>.</li>
+        <li>Create <strong>config/loader.py</strong> that reads <code>/data/options.json</code> (Home Assistant path), parses it into the Pydantic config schema, and raises a clear error if required fields are missing.</li>
+        <li>Create <strong>main.py</strong> that loads config, selects the broker adapter based on <code>active_broker</code>, and prints "Bot initialized with [broker] in [paper/live] mode" then exits cleanly.</li>
+        <li>Create <strong>requirements.txt</strong> with: ib_insync, pydantic, gspread, google-auth, asyncio, pytest, pytest-asyncio.</li>
+        <li>Create a <strong>tests/test_config.py</strong> that asserts default values load correctly and missing <code>google_sheet_id</code> raises a validation error.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- PR 2 -->
+  <div class="pr-block">
+    <div class="pr-header">
+      <span class="pr-num">PR-02</span>
+      <span class="pr-title">Google Sheets Interface & Grid Schema</span>
+    </div>
+    <div class="pr-body">
+      <p><strong>Prompt to paste into Jules:</strong></p>
+      <p>Implement the Google Sheets interface module. The Google Sheet is the source of truth for the trading grid — the bot never modifies buy/sell prices or quantities, only reads them and writes fill confirmations.</p>
+      <ul>
+        <li>Create <strong>sheets/schema.py</strong> defining column constants for a tab called "Grid" with columns: <code>ROW_ID, TYPE (BUY/SELL), TRIGGER_PRICE, LIMIT_PRICE, QUANTITY, ACTIVE (TRUE/FALSE), NOTES</code>. Define constants for a "Fills" tab with: <code>TIMESTAMP, ROW_ID, TYPE, FILLED_PRICE, FILLED_QTY, ORDER_ID</code>.</li>
+        <li>Create <strong>sheets/interface.py</strong> with class <code>SheetInterface</code> using <code>gspread</code> and service account credentials loaded from the JSON string in config. Implement: <code>async fetch_grid() -> GridState</code>, <code>async log_fill(fill_data: dict) -> bool</code>, <code>async log_error(error_msg: str) -> bool</code>. Only rows where ACTIVE == TRUE should be loaded into GridState.</li>
+        <li>Create <strong>engine/grid_state.py</strong> with a <code>GridState</code> dataclass holding <code>buy_levels: list[GridLevel]</code> and <code>sell_levels: list[GridLevel]</code>. <code>GridLevel</code> should hold: <code>row_id, trigger_price, limit_price, quantity</code>.</li>
+        <li>Create <strong>tests/test_sheet_interface.py</strong> using <code>unittest.mock</code> to mock the gspread client and assert that <code>fetch_grid()</code> correctly filters inactive rows and returns proper <code>GridState</code> objects.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- PR 3 -->
+  <div class="pr-block">
+    <div class="pr-header">
+      <span class="pr-num">PR-03</span>
+      <span class="pr-title">IBKR Adapter — Paper Trading Connection & Orders</span>
+    </div>
+    <div class="pr-body">
+      <p><strong>Prompt to paste into Jules:</strong></p>
+      <p>Implement the full IBKRAdapter using ib_insync. This must connect to IBKR Paper Trading on port 7497 and support all BrokerBase methods. This is the most critical PR — implement with care.</p>
+      <ul>
+        <li>In <strong>brokers/ibkr/connection.py</strong> implement async connect with exponential backoff retry (max 10 attempts, starting at 5s, doubling each retry). Log every attempt. Raise a fatal exception if all retries fail.</li>
+        <li>In <strong>brokers/ibkr/order_builder.py</strong> implement bracket order generation <code>(ib.bracketOrder)</code>. The adapter MUST dynamically set <code>contract.exchange = 'OVERNIGHT'</code> if the current system time is between 8:00 PM and 3:50 AM ET; otherwise, it must use <code>SMART</code> Both the parent limit order and child take-profit order must inherit this dynamic exchange, use <code>tif='GTC'<code>, and set <code>outsideRth=True</code>.</li>
+        <li>In <strong>brokers/ibkr/adapter.py</strong> implement all BrokerBase methods: <code>connect()</code>, <code>disconnect()</code>, <code>get_price()</code> using <code>ib.reqMktData()</code>, <code>get_bid_ask()</code>, <code>place_limit_order()</code> which calls order_builder and submits via <code>ib.placeOrder()</code>, <code>cancel_order()</code>, <code>get_open_orders()</code>, <code>get_positions()</code>. The TQQQ contract is always <code>Stock('TQQQ', 'SMART', 'USD')</code>.</li>
+        <li>Fill callbacks: subscribe to <code>ib.orderStatusEvent</code>. When an order status becomes 'Filled', call the provided <code>on_fill</code> callback with fill details.</li>
+        <li>Create <strong>tests/test_ibkr_adapter.py</strong> using MagicMock to mock the IB() object and assert that place_limit_order correctly sets outsideRth=True and tif='GTC' on submitted orders.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- PR 4 -->
+  <div class="pr-block">
+    <div class="pr-header">
+      <span class="pr-num">PR-04</span>
+      <span class="pr-title">Engine Core — Grid Loop, OrderManager, SpreadGuard</span>
+    </div>
+    <div class="pr-body">
+      <p><strong>Prompt to paste into Jules:</strong></p>
+      <p>Implement the core trading engine. This module must have zero broker-specific imports — it only uses BrokerBase. All TQQQ-specific logic lives here (ticker constant, grid comparison).</p>
+      <ul>
+        <li>Create <strong>engine/spread_guard.py</strong> with <code>SpreadGuard(max_spread_pct: float)</code>. Method <code>is_too_wide(bid, ask) -> bool</code> returns True if <code>(ask - bid) / ask * 100 > max_spread_pct</code>. Log a warning when spread is blocked.</li>
+        <li>Create <strong>engine/order_manager.py</strong> with <code>OrderManager</code> that tracks open orders by row_id. Methods: <code>track(row_id, order_result)</code>, <code>has_open_buy(row_id) -> bool</code>, <code>has_open_sell(row_id) -> bool</code>, <code>mark_filled(order_id)</code>, <code>mark_cancelled(order_id)</code>.</li>
+        <li>Create <strong>engine/engine.py</strong> with class <code>GridEngine</code> The <code>async run()</code> loop must act as a self-healing sliding window state reconciler. Because IBKR orders may be cancelled during the transition between OVERNIGHT and SMART sessions, the engine must periodically fetch <code>broker.get_open_orders()</code> and cross-reference it with the expected <code>GridState</code>. If an active grid level expects an open order but the broker has none, the engine must automatically re-issue the bracket order using the current time-appropriate exchange routing.</li>
+        <li>Update <strong>main.py</strong> to instantiate <code>GridEngine</code> with the correct broker and sheet, then call <code>asyncio.run(engine.run())</code>.</li>
+        <li>Create <strong>tests/test_engine.py</strong> that mocks broker and sheet, asserts that a buy order is placed when price drops to trigger level, and not placed again if already tracked in OrderManager.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- PR 5 -->
+  <div class="pr-block">
+    <div class="pr-header">
+      <span class="pr-num">PR-05</span>
+      <span class="pr-title">Docker, IB Gateway, Supervisord, HA Addon</span>
+    </div>
+    <div class="pr-body">
+      <p><strong>Prompt to paste into Jules:</strong></p>
+      <p>Create all Home Assistant Addon Docker files. This is the deployment layer — the container must run IB Gateway (headless Java) and the Python bot simultaneously using supervisord.</p>
+      <ul>
+        <li>Create <strong>addon/Dockerfile</strong> based on <code>python:3.11-slim</code>. Install: Java 17 JRE (for IB Gateway), supervisord, wget, unzip. Download IB Gateway stable installer from IBKR's CDN. Download IBC (IBController) from its GitHub releases. Install Python requirements. Copy all source files. Set entrypoint to <code>run.sh</code>.</li>
+        <li>Create <strong>addon/supervisord.conf</strong> with two programs. Critically: limit the </code>[program:ibgateway]</code> Java process to 512MB of RAM using the </code>-Xmx512M</code> flag in the launch command to protect the host machine's memory. Then configure </code>[program:botpy]</code> to run </code>python /app/main.py</code> with </code>depends_on=ibgateway</code> and a 30-second startup delay.</li>
+        <li>Create <strong>addon/run.sh</strong> that: reads IBKR credentials from environment variables (populated by HA from options.json), renders <code>gateway/ibc_config.ini.template</code> to <code>/tmp/ibc_config.ini</code>, then exec's supervisord.</li>
+        <li>Create <strong>gateway/ibc_config.ini.template</strong> with IBC settings using placeholders <code>${IBKR_USERNAME}</code>, <code>${IBKR_PASSWORD}</code>, <code>${TRADING_MODE}</code> (paper/live).</li>
+        <li>Create <strong>addon/config.yaml</strong> (HA Addon manifest) with name "TQQQ Grid Bot v5", version "5.0.0", arch support for amd64 and aarch64.</li>
+        <li>Create <strong>addon/options.schema.json</strong> matching the Pydantic config schema fields for HA UI input.</li>
+        <li>Create <strong>gateway/wait_for_gateway.py</strong> that polls <code>localhost:7497</code> every 5s until connection succeeds or times out after 120s. This is called by run.sh before starting the bot.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- PR 6 -->
+  <div class="pr-block">
+    <div class="pr-header">
+      <span class="pr-num">PR-06</span>
+      <span class="pr-title">Reconnection Hardening, Health Logging, Final Cleanup</span>
+    </div>
+    <div class="pr-body">
+      <p><strong>Prompt to paste into Jules:</strong></p>
+      <p>Harden the bot for 24/7 unattended operation. Add reconnection logic, health status logging, and a clean shutdown handler.</p>
+      <ul>
+        <li>In <strong>brokers/ibkr/adapter.py</strong> add a watchdog: if <code>ib.isConnected()</code> returns False during the engine loop, attempt reconnection with backoff before raising. Do not crash the engine on a single dropped connection.</li>
+        <li>In <strong>engine/engine.py</strong> add a SIGTERM handler for graceful shutdown: cancel all open GTC orders placed by this session before disconnecting. Log every cancelled order.</li>
+        <li>Add a <strong>health_log</strong> that writes to Google Sheet tab "Health": timestamp, last_price, open_orders_count, last_fill_time, status. Update every 5 minutes.</li>
+        <li>Add <strong>README.md</strong> with: setup instructions, Google Sheet schema table, options.json reference table, paper-to-live promotion checklist, broker swap instructions.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- SECTION 7 -->
+<section id="config">
+  <div class="section-label">// 07</div>
+  <h2>Configuration Reference (options.json)</h2>
+
+  <table>
+    <thead><tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>active_broker</code></td><td>string</td><td>"ibkr"</td><td>"ibkr" or "schwab" — selects adapter</td></tr>
+      <tr><td><code>paper_trading</code></td><td>bool</td><td>true</td><td>true = port 7497 (paper), false = 7496 (live)</td></tr>
+      <tr><td><code>ibkr_username</code></td><td>string</td><td>—</td><td>IBKR account username (for IBC auto-login)</td></tr>
+      <tr><td><code>ibkr_password</code></td><td>string</td><td>—</td><td>IBKR account password (stored in HA secrets)</td></tr>
+      <tr><td><code>ibkr_client_id</code></td><td>int</td><td>1</td><td>ib_insync client ID (unique per connection)</td></tr>
+      <tr><td><code>poll_interval_seconds</code></td><td>int</td><td>10</td><td>How often engine checks price vs grid</td></tr>
+      <tr><td><code>max_spread_pct</code></td><td>float</td><td>0.5</td><td>Max bid-ask spread % before skipping order</td></tr>
+      <tr><td><code>grid_refresh_minutes</code></td><td>int</td><td>15</td><td>How often bot re-reads grid from Sheet</td></tr>
+      <tr><td><code>google_sheet_id</code></td><td>string</td><td>—</td><td>Google Sheet ID from URL</td></tr>
+      <tr><td><code>google_credentials_json</code></td><td>string</td><td>—</td><td>Service account JSON (as escaped string)</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<hr class="divider">
+
+<!-- SECTION 8 -->
+<section id="docker">
+  <div class="section-label">// 08</div>
+  <h2>Docker & HA Addon Architecture</h2>
+
+  <h3>Container Process Map</h3>
+  <pre><code>supervisord (PID 1)
+├── ibgateway   ← IBC launches IB Gateway headless Java process
+│               ← Auto-logs in using ibkr_username / ibkr_password
+│               ← Listens on localhost:7497 (paper) or :7496 (live)
+│               ← NO GUI, NO X11 required
+│
+└── botpy       ← waits 30s for gateway to be ready
+                ← python /app/main.py
+                ← connects to localhost:7497 via ib_insync
+                ← runs engine loop forever
+<div class="pre-label">Container</div></code></pre>
+
+  <div class="callout callout-warn">
+    <strong>⚠ IB Gateway Version Lock</strong>
+    Pin the IB Gateway version in the Dockerfile. IBKR silently updates Gateway and breaking changes happen. Jules should use the current stable version at build time and document the version number in a comment.
+  </div>
+
+  <h3>HA Addon Options Flow</h3>
+  <pre><code>HA UI → options.json → /data/options.json (in container)
+                     ↓
+              config/loader.py reads it
+                     ↓
+         run.sh extracts IBKR_USERNAME, IBKR_PASSWORD
+         → renders ibc_config.ini template
+                     ↓
+         IBC auto-logs into IB Gateway
+<div class="pre-label">HA Flow</div></code></pre>
+</section>
+
+<hr class="divider">
+
+<!-- SECTION 9 -->
+<section id="sheets">
+  <div class="section-label">// 09</div>
+  <h2>Google Sheet Schema</h2>
+
+  <h3>Tab: Grid (Source of Truth — manually edited by human)</h3>
+  <table>
+    <thead><tr><th>Col A</th><th>Col B</th><th>Col C</th><th>Col D</th><th>Col E</th><th>Col F</th><th>Col G</th></tr></thead>
+    <tbody>
+      <tr><td><strong>ROW_ID</strong></td><td><strong>TYPE</strong></td><td><strong>TRIGGER_PRICE</strong></td><td><strong>LIMIT_PRICE</strong></td><td><strong>QUANTITY</strong></td><td><strong>ACTIVE</strong></td><td><strong>NOTES</strong></td></tr>
+      <tr><td>BUY_01</td><td>BUY</td><td>45.00</td><td>44.95</td><td>10</td><td>TRUE</td><td>Level 1 buy</td></tr>
+      <tr><td>SELL_01</td><td>SELL</td><td>52.00</td><td>52.05</td><td>10</td><td>TRUE</td><td>Level 1 sell</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Tab: Fills (Written by bot — do not edit)</h3>
+  <table>
+    <thead><tr><th>TIMESTAMP</th><th>ROW_ID</th><th>TYPE</th><th>FILLED_PRICE</th><th>FILLED_QTY</th><th>ORDER_ID</th></tr></thead>
+    <tbody>
+      <tr><td>2025-03-09 08:14:33</td><td>BUY_01</td><td>BUY</td><td>44.93</td><td>10</td><td>IBKR-123456</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-info">
+    <strong>ℹ Trigger vs Limit Price</strong>
+    TRIGGER_PRICE is the market price at which the bot decides to place the order. LIMIT_PRICE is the actual limit price sent to IBKR. This allows you to place a buy limit slightly below the trigger, giving a better fill price. The spread between them is your slippage budget.
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- SECTION 10 -->
+<section id="trading">
+  <div class="section-label">// 10</div>
+  <h2>Trading Logic & Extended Hours</h2>
+
+  <h3>TQQQ Trading Hours</h3>
+  <table>
+    <thead><tr><th>Session</th><th>Hours (ET)</th><th>IBKR Support</th><th>outsideRth Flag</th></tr></thead>
+    <tbody>
+      <tr><td>Pre-Market</td><td>4:00 AM – 9:30 AM</td><td>✓ Yes</td><td>Required</td></tr>
+      <tr><td>Regular Hours</td><td>9:30 AM – 4:00 PM</td><td>✓ Yes</td><td>Not needed</td></tr>
+      <tr><td>After-Hours</td><td>4:00 PM – 8:00 PM</td><td>✓ Yes</td><td>Required</td></tr>
+      <tr><td>Overnight</td><td>8:00 PM – 4:00 AM</td><td>✗ No (TQQQ closed)</td><td>N/A</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-success">
+    <strong>✓ Extended Hours Strategy</strong>
+    All orders are placed as GTC Limit orders with outsideRth=True. This means an order placed at 9 PM will remain live when pre-market opens at 4 AM. The SpreadGuard is especially important during extended hours when spreads widen significantly.
+  </div>
+
+  <h3>Order Deduplication</h3>
+  <p>The OrderManager prevents placing duplicate orders for the same grid level. If a BUY order for ROW_ID "BUY_01" is already open at IBKR, the engine will not submit another one even if the price re-triggers. Orders are only re-eligible after being filled or explicitly cancelled.</p>
+</section>
+
+<hr class="divider">
+
+<!-- SECTION 11 -->
+<section id="testing">
+  <div class="section-label">// 11</div>
+  <h2>Paper Trading & Testing Protocol</h2>
+
+  <h3>Paper Trading Checklist (must complete before live)</h3>
+  <ul>
+    <li>☐ IB Gateway connects on port 7497 with paper credentials</li>
+    <li>☐ <code>get_price('TQQQ')</code> returns real-time quotes</li>
+    <li>☐ <code>get_bid_ask('TQQQ')</code> returns real-time bid/ask</li>
+    <li>☐ SpreadGuard blocks order when spread is artificially widened in test</li>
+    <li>☐ BUY limit order placed at correct price with GTC + outsideRth=True</li>
+    <li>☐ Order visible in IBKR paper account TWS</li>
+    <li>☐ Fill event received and logged to Google Sheet "Fills" tab</li>
+    <li>☐ Duplicate order for same ROW_ID is NOT placed</li>
+    <li>☐ Grid refresh picks up new row added to Sheet mid-run</li>
+    <li>☐ Bot reconnects cleanly after simulated Gateway restart</li>
+    <li>☐ SIGTERM causes graceful shutdown with order cancellation log</li>
+    <li>☐ Extended hours order survives overnight and is visible at 4 AM pre-market</li>
+  </ul>
+
+  <h3>Go-Live Switch</h3>
+  <pre><code><span class="cm"># In options.json — the ONLY changes needed to go live:</span>
+{
+  <span class="str">"paper_trading"</span>: <span class="num">false</span>,    <span class="cm">// switches port from 7497 → 7496</span>
+  <span class="str">"ibkr_username"</span>: <span class="str">"YOUR_LIVE_USER"</span>,
+  <span class="str">"ibkr_password"</span>: <span class="str">"YOUR_LIVE_PASS"</span>
+}
+<div class="pre-label">go-live</div></code></pre>
+</section>
+
+<hr class="divider">
+
+<!-- SECTION 12 -->
+<section id="broker-swap">
+  <div class="section-label">// 12</div>
+  <h2>Broker Swap Guide</h2>
+
+  <p>If IBKR doesn't work out and you need to move to another broker (Alpaca, Tradier, Tastytrade, etc.), follow these exact steps:</p>
+
+  <ol style="padding-left:22px; line-height:2.2;">
+    <li>Create <code>brokers/&lt;newbroker&gt;/adapter.py</code> implementing all <code>BrokerBase</code> methods</li>
+    <li>Add any broker-specific config fields to <code>config/schema.py</code></li>
+    <li>Update <code>options.schema.json</code> for HA UI</li>
+    <li>In <code>options.json</code> set <code>"active_broker": "&lt;newbroker&gt;"</code></li>
+    <li>No changes to <code>engine/</code>, <code>sheets/</code>, or <code>main.py</code></li>
+  </ol>
+
+  <div class="callout callout-success">
+    <strong>✓ Alpaca is the Recommended Fallback</strong>
+    Alpaca has a REST API with paper trading, supports extended hours on ETFs including TQQQ, has a clean Python SDK (<code>alpaca-trade-api</code>), and requires no locally-running Gateway process. The IBKRAdapter is ~200 lines — an AlpacaAdapter would be simpler at ~100 lines.
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- FOOTER -->
+<footer>
+  <div class="f-left">
+    <div>TQQQ Grid Bot v5 Engineering Plan</div>
+    <div>Generated for Jules/Gemini PR Workflow</div>
+    <div style="color:var(--accent)">paper_trading: true // always start here</div>
+  </div>
+  <div class="f-right">V5</div>
+</footer>
+
+</body>
+</html>
