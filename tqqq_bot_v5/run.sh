@@ -37,4 +37,4 @@ export TWS_SETTINGS_PATH=/opt/ibgateway
 # If supervisord manages both, I can't call it in run.sh before supervisord because gateway isn't running yet.
 # I'll modify the botpy command in supervisord.conf to call wait_for_gateway.py first.
 
-exec /usr/bin/supervisord -c /app/addon/supervisord.conf
+exec /usr/bin/supervisord -c /app/supervisord.conf

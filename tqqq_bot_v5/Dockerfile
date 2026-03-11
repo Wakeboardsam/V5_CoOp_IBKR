@@ -41,5 +41,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Set entrypoint
-RUN chmod +x addon/run.sh
-ENTRYPOINT ["/app/addon/run.sh"]
+RUN chmod +x run.sh
+ENTRYPOINT ["/app/run.sh"]
