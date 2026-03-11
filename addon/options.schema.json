@@ -1,0 +1,13 @@
+{
+  "active_broker": "list(ibkr|schwab)",
+  "paper_trading": "bool",
+  "ibkr_host": "str",
+  "ibkr_port": "int",
+  "ibkr_client_id": "int",
+  "ibkr_username": "str?",
+  "ibkr_password": "password?",
+  "poll_interval_seconds": "int",
+  "max_spread_pct": "float",
+  "google_sheet_id": "str",
+  "google_credentials_json": "str"
+}

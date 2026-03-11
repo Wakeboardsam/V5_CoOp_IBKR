@@ -1,0 +1,31 @@
+name: "TQQQ Grid Bot v5"
+version: "5.0.0"
+slug: "tqqq_grid_bot_v5"
+description: "Asyncio trading bot for TQQQ grid strategy on IBKR"
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+options:
+  active_broker: "ibkr"
+  paper_trading: true
+  ibkr_host: "127.0.0.1"
+  ibkr_port: 7497
+  ibkr_client_id: 1
+  poll_interval_seconds: 10
+  max_spread_pct: 0.5
+  google_sheet_id: ""
+  google_credentials_json: ""
+schema:
+  active_broker: "list(ibkr|schwab)"
+  paper_trading: "bool"
+  ibkr_host: "str"
+  ibkr_port: "int"
+  ibkr_client_id: "int"
+  ibkr_username: "str?"
+  ibkr_password: "password?"
+  poll_interval_seconds: "int"
+  max_spread_pct: "float"
+  google_sheet_id: "str"
+  google_credentials_json: "str"
