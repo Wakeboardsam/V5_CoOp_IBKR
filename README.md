@@ -1,2 +1,0 @@
-# V5_CoOp_IBKR
-V5_CoOp_IBKR
