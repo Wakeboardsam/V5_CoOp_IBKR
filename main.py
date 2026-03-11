@@ -1,11 +1,26 @@
 import sys
+import asyncio
+import logging
 from config.loader import load_config
 from brokers.ibkr.adapter import IBKRAdapter
 from brokers.schwab.adapter import SchwabAdapter
+from engine.engine import GridEngine
+from sheets.interface import SheetInterface
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
+)
+logger = logging.getLogger(__name__)
 
-def main():
-    config = load_config()
+async def main():
+    try:
+        config = load_config()
+    except Exception as e:
+        print(f"Error loading config: {e}", file=sys.stderr)
+        sys.exit(1)
 
     if config.active_broker == "ibkr":
         broker = IBKRAdapter(
@@ -20,9 +35,19 @@ def main():
         print(f"Error: Unsupported broker '{config.active_broker}'", file=sys.stderr)
         sys.exit(1)
 
-    mode = "paper" if config.paper_trading else "live"
-    print(f"Bot initialized with {config.active_broker} in {mode} mode")
+    sheet = SheetInterface(config)
+    engine = GridEngine(broker, sheet, config)
 
+    mode = "paper" if config.paper_trading else "live"
+    logger.info(f"Bot initialized with {config.active_broker} in {mode} mode")
+
+    try:
+        await engine.run()
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Bot crashed: {e}", exc_info=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

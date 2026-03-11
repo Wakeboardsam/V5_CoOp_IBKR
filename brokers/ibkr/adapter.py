@@ -100,7 +100,7 @@ class IBKRAdapter(BrokerBase):
         self.ib.placeOrder(contract, take_profit)
 
         return OrderResult(
-            order_id=str(parent.orderId),
+            order_id=f"{parent.orderId}|{take_profit.orderId}",
             status='submitted'
         )
 
