@@ -41,6 +41,10 @@ async def main():
     mode = "paper" if config.paper_trading else "live"
     logger.info(f"Bot initialized with {config.active_broker} in {mode} mode")
 
+    logger.info("")
+    logger.info("* TQQQ GRID BOT V5 OFFICIALLY STARTED!       *")
+    logger.info("")
+
     try:
         await engine.run()
     except KeyboardInterrupt:
