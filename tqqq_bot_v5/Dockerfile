@@ -20,11 +20,12 @@ WORKDIR /app
 # We use the x64 installer. For aarch64, it's expected to run via emulation in the target environment if native is unavailable.
 RUN wget -q https://download2.interactivebrokers.com/installers/ibgateway/stable-standalone/ibgateway-stable-standalone-linux-x64.sh \
     && chmod +x ibgateway-stable-standalone-linux-x64.sh \
-    && ./ibgateway-stable-standalone-linux-x64.sh -q -dir /opt/ibgateway \
+    && ./ibgateway-stable-standalone-linux-x64.sh -q -dir /root/Jts/ibgateway \
     && rm ibgateway-stable-standalone-linux-x64.sh
+RUN mv /root/Jts/ibgateway/* /root/Jts/ibgateway/9999
 
 # Configure IB Gateway memory limit
-RUN find /opt/ibgateway -name "*.vmoptions" -exec sh -c 'echo "-Xmx512m" >> "{}"' \;
+RUN find /root/Jts/ibgateway -name "*.vmoptions" -exec sh -c 'echo "-Xmx512m" >> "{}"' \;
 
 # Install IBC
 RUN wget -q https://github.com/IbcAlpha/IBC/releases/download/3.23.0/IBCLinux-3.23.0.zip \

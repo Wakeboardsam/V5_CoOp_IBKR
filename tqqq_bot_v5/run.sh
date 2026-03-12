@@ -21,9 +21,9 @@ cat /app/gateway/ibc_config.ini.template | envsubst > /tmp/ibc_config.ini
 
 # Export variables for IBC
 export IBC_INI=/tmp/ibc_config.ini
-export TWS_PATH=/opt/ibgateway
+export TWS_PATH=/root/Jts
 export IBC_PATH=/opt/ibc
-export TWS_SETTINGS_PATH=/opt/ibgateway
+export TWS_SETTINGS_PATH=/root/Jts
 
 # Wait for Gateway port before starting supervisord?
 # No, supervisord starts both. But we can use wait_for_gateway.py in botpy's command if needed.
