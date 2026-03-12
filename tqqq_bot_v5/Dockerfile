@@ -23,6 +23,9 @@ RUN wget -q https://download2.interactivebrokers.com/installers/ibgateway/stable
     && ./ibgateway-stable-standalone-linux-x64.sh -q -dir /opt/ibgateway \
     && rm ibgateway-stable-standalone-linux-x64.sh
 
+# Configure IB Gateway memory limit
+RUN find /opt/ibgateway -name "*.vmoptions" -exec sh -c 'echo "-Xmx512m" >> "{}"' \;
+
 # Install IBC
 RUN wget -q https://github.com/IbcAlpha/IBC/releases/download/3.23.0/IBCLinux-3.23.0.zip \
     && mkdir -p /opt/ibc \
