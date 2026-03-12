@@ -23,6 +23,7 @@ RUN wget -q https://download2.interactivebrokers.com/installers/ibgateway/stable
     && chmod +x ibgateway-stable-standalone-linux-x64.sh \
     && ./ibgateway-stable-standalone-linux-x64.sh -q -dir /root/Jts/ibgateway \
     && rm ibgateway-stable-standalone-linux-x64.sh
+
 RUN VERSION_DIR=$(dirname $(find /root/Jts -name jars -type d | head -n 1)) && ln -sfn $VERSION_DIR /root/Jts/ibgateway/9999
 
 # Configure IB Gateway memory limit
@@ -42,7 +43,8 @@ RUN wget -q https://github.com/IbcAlpha/IBC/releases/download/3.23.0/IBCLinux-3.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application source code
+# Copy application source code and supervisord config
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY . .
 
 # Set entrypoint

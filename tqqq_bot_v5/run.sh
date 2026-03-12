@@ -25,16 +25,15 @@ export TWS_PATH=/root/Jts
 export IBC_PATH=/opt/ibc
 export TWS_SETTINGS_PATH=/root/Jts
 
-# Wait for Gateway port before starting supervisord?
-# No, supervisord starts both. But we can use wait_for_gateway.py in botpy's command if needed.
-# However, the requirement said run.sh should render and then exec supervisord.
-# wait_for_gateway.py is called by run.sh? No, botpy has 30s delay.
-# Wait, the prompt says: "Create gateway/wait_for_gateway.py ... This is called by run.sh before starting the bot."
-# If I exec supervisord, it never returns. I should probably use it in botpy command or before exec supervisord if I don't use supervisord for gateway?
-# No, supervisord MUST run both.
+echo "Starting Xvfb..."
+Xvfb :99 -ac -screen 0 1024x768x16 &
+export DISPLAY=:99
 
-# Let's check the requirement again: "This is called by run.sh before starting the bot."
-# If supervisord manages both, I can't call it in run.sh before supervisord because gateway isn't running yet.
-# I'll modify the botpy command in supervisord.conf to call wait_for_gateway.py first.
+echo "Starting IB Gateway via IBC..."
+/opt/ibc/gatewaystart.sh 9999 -inline --tws-path=/root/Jts --tws-settings-path=/root/Jts --ibc-ini=/tmp/ibc_config.ini &
 
-exec /usr/bin/supervisord -c /app/supervisord.conf
+echo "Waiting 30 seconds for Gateway to initialize..."
+sleep 30
+
+echo "Starting Supervisord to launch Python Bot..."
+exec supervisord -c /etc/supervisor/conf.d/supervisord.conf
