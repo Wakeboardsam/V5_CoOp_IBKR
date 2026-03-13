@@ -31,7 +31,7 @@ class IBKRAdapter(BrokerBase):
         return self.ib.isConnected()
 
     async def ensure_connected(self):
-        if not self.is_connected():
+        if not await self.is_connected():
             logger.warning("IBKR disconnected. Watchdog attempting reconnection...")
             # Implement exponential backoff for reconnection as requested
             delay = 5
@@ -44,7 +44,7 @@ class IBKRAdapter(BrokerBase):
                         self.ib.connectAsync(self.host, self.port, clientId=self.client_id),
                         timeout=30
                     )
-                    if self.is_connected():
+                    if await self.is_connected():
                         logger.info("Watchdog successfully reconnected.")
                         return
                 except Exception as e:
