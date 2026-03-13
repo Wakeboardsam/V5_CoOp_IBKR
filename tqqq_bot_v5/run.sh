@@ -8,7 +8,8 @@ if [ "$PAPER_FLAG" = "false" ]; then
 TRADING_MODE="live"
 fi
 echo "Generating IBC config..."
-cat <<EOF > /tmp/ibc_config.ini
+mkdir -p /root/ibc
+cat <<EOF > /root/ibc/config.ini
 IbLoginId=${IBKR_USER}
 IbPassword=${IBKR_PASS}
 TradingMode=${TRADING_MODE}
@@ -18,7 +19,10 @@ echo "Starting Xvfb..."
 Xvfb :99 -ac -screen 0 1024x768x16 &
 export DISPLAY=:99
 echo "Starting IB Gateway via IBC..."
-/opt/ibc/gatewaystart.sh 9999 -inline --tws-path=/root/Jts --tws-settings-path=/root/Jts --ibc-ini=/tmp/ibc_config.ini < /dev/null &
+export TWS_MAJOR_VRSN=1019
+export TWS_PATH=/root/Jts
+export IBC_PATH=/opt/ibc
+/opt/ibc/gatewaystart.sh -inline < /dev/null &
 echo "Waiting 30 seconds for Gateway to initialize..."
 sleep 30
 echo "=== IBC DIAGNOSTIC LOGS ==="
