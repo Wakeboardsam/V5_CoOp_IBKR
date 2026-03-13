@@ -95,6 +95,15 @@ class IBKRAdapter(BrokerBase):
         finally:
             self.ib.cancelMktData(contract)
 
+    async def get_wallet_balance(self) -> float:
+        """
+        Returns the USD AvailableFunds from the account.
+        """
+        for val in self.ib.accountValues():
+            if val.tag == 'AvailableFunds' and val.currency == 'USD':
+                return float(val.value)
+        return 0.0
+
     async def place_limit_order(
         self, ticker: str, action: str,
         qty: int, limit_price: float,
@@ -108,7 +117,7 @@ class IBKRAdapter(BrokerBase):
 
         order = LimitOrder(action, qty, limit_price)
         order.tif = 'GTC'
-        order.outsideRth = extended_hours
+        order.outsideRth = True
 
         self.ib.placeOrder(contract, order)
 
@@ -180,7 +189,8 @@ class IBKRAdapter(BrokerBase):
         return positions
 
     def _on_order_status(self, trade: Trade):
-        if trade.orderStatus.status == 'Filled':
+        status = trade.orderStatus.status
+        if status == 'Filled':
             order_id = str(trade.order.orderId)
             callback = self._on_fill_callbacks.get(order_id)
             if callback:
@@ -195,3 +205,14 @@ class IBKRAdapter(BrokerBase):
                 logger.info(f"Fill callback called for order {order_id}")
                 # Optional: remove callback after fill if it's a one-time thing
                 # del self._on_fill_callbacks[order_id]
+        elif status in ('Cancelled', 'Inactive', 'Rejected'):
+            reason = trade.orderStatus.whyHeld or "No reason provided"
+            logger.warning(
+                f"\n"
+                f"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+                f"LOUD ALERT: ORDER {trade.order.orderId} {status.upper()}!\n"
+                f"Ticker: {trade.contract.symbol}\n"
+                f"Action: {trade.order.action}\n"
+                f"Reason: {reason}\n"
+                f"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+            )
