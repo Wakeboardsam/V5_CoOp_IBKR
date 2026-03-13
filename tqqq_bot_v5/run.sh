@@ -21,10 +21,8 @@ echo "Starting IB Gateway via IBC..."
 /opt/ibc/gatewaystart.sh 9999 -inline --tws-path=/root/Jts --tws-settings-path=/root/Jts --ibc-ini=/tmp/ibc_config.ini < /dev/null &
 echo "Waiting 30 seconds for Gateway to initialize..."
 sleep 30
-echo "=== SEARCHING FOR AND DUMPING IBC DIAGNOSTIC LOGS ==="
-cat /root/ibc/logs/*.txt 2>&1 || echo "No logs found at /root/ibc/logs/"
-echo "--- Searching alternate paths ---"
-find /root/ibc /opt/ibc /root/Jts -name "*.txt" -print -exec cat {} \; 2>/dev/null
-echo "====================================================="
+echo "=== IBC DIAGNOSTIC LOGS ==="
+cat /root/ibc/logs/*.txt 2>/dev/null || echo "No IBC logs found."
+echo "==========================="
 echo "Starting Supervisord to launch Python Bot..."
 exec supervisord -c /etc/supervisor/conf.d/supervisord.conf
