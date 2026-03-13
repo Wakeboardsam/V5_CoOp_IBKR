@@ -3,7 +3,7 @@ import time
 import sys
 import argparse
 
-def wait_for_port(port, host='localhost', timeout=120):
+def wait_for_port(port, host='localhost', timeout=300):
     start_time = time.time()
     while True:
         try:
@@ -20,7 +20,7 @@ def wait_for_port(port, host='localhost', timeout=120):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Wait for IB Gateway to be ready.')
     parser.add_argument('--port', type=int, default=7497, help='Port to poll (default: 7497)')
-    parser.add_argument('--timeout', type=int, default=120, help='Max timeout in seconds (default: 120)')
+    parser.add_argument('--timeout', type=int, default=300, help='Max timeout in seconds (default: 300)')
     args = parser.parse_args()
 
     if not wait_for_port(args.port, timeout=args.timeout):
