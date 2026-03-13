@@ -24,7 +24,10 @@ RUN wget -q https://download2.interactivebrokers.com/installers/ibgateway/stable
     && ./ibgateway-stable-standalone-linux-x64.sh -q -dir /root/Jts/ibgateway \
     && rm ibgateway-stable-standalone-linux-x64.sh
 
-RUN VERSION_DIR=$(dirname $(find /root/Jts -name jars -type d | head -n 1)) && ln -sfn $VERSION_DIR /root/Jts/ibgateway/9999
+RUN mkdir -p /root/Jts/ibgateway \
+    && JARS_PARENT=$(dirname $(find /root/Jts -name jars -type d | head -n 1)) \
+    && ln -sfn $JARS_PARENT /root/Jts/ibgateway/1019 \
+    && ln -sfn $JARS_PARENT /root/Jts/1019
 
 # Configure IB Gateway memory limit
 RUN find /root/Jts/ibgateway -name "*.vmoptions" -exec sh -c 'echo "-Xmx512m" >> "{}"' \;
