@@ -14,6 +14,10 @@ IbLoginId=${IBKR_USER}
 IbPassword=${IBKR_PASS}
 TradingMode=${TRADING_MODE}
 IbDir=/root/Jts
+ReadOnlyApi=no
+OverrideTwsApiPort=7497
+AcceptIncomingConnectionAction=accept
+AcceptNonBrokerageAccountWarning=yes
 EOF
 echo "Starting Xvfb..."
 Xvfb :99 -ac -screen 0 1024x768x16 &
