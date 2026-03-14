@@ -144,23 +144,23 @@ async def test_get_wallet_balance(mock_ib):
     adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
     adapter.ib = mock_ib
 
-    # Mock accountValues
+    # Mock accountValuesAsync
     val1 = MagicMock()
     val1.tag = 'NetLiquidation'
     val1.value = '1000.0'
     val1.currency = 'USD'
 
     val2 = MagicMock()
-    val2.tag = 'AvailableFunds'
+    val2.tag = 'TotalCashValue'
     val2.value = '500.0'
     val2.currency = 'USD'
 
     val3 = MagicMock()
-    val3.tag = 'AvailableFunds'
+    val3.tag = 'TotalCashBalance'
     val3.value = '100.0'
     val3.currency = 'EUR'
 
-    mock_ib.accountValues.return_value = [val1, val2, val3]
+    mock_ib.accountValuesAsync = AsyncMock(return_value=[val1, val2, val3])
 
     balance = await adapter.get_wallet_balance()
     assert balance == 500.0
