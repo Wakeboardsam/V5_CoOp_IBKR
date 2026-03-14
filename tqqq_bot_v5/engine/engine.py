@@ -116,6 +116,17 @@ class GridEngine:
         # 0. Watchdog: ensure connection
         await self.broker.ensure_connected()
 
+        # 0.1 Diagnostic: fetch balance and price
+        try:
+            balance = await self.broker.get_wallet_balance()
+            price = await self.broker.get_price(TICKER)
+            self.last_price = price
+            if balance == 0 or price == 0:
+                logger.error("API call returned empty — possible Gateway auth or subscription issue")
+        except Exception as e:
+            logger.error(f"Diagnostic API call failed: {e}")
+            logger.error("API call returned empty — possible Gateway auth or subscription issue")
+
         # 1. Always Refresh grid from sheet
         self.grid_state = await self.sheet.fetch_grid()
         if not self.grid_state:
