@@ -138,3 +138,44 @@ async def test_market_data_cancellation(mock_ib):
     assert price == 50.0
     mock_ib.reqMktData.assert_called_once()
     mock_ib.cancelMktData.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_get_wallet_balance(mock_ib):
+    adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
+    adapter.ib = mock_ib
+
+    # Mock accountValues
+    val1 = MagicMock()
+    val1.tag = 'NetLiquidation'
+    val1.value = '1000.0'
+    val1.currency = 'USD'
+
+    val2 = MagicMock()
+    val2.tag = 'AvailableFunds'
+    val2.value = '500.0'
+    val2.currency = 'USD'
+
+    val3 = MagicMock()
+    val3.tag = 'AvailableFunds'
+    val3.value = '100.0'
+    val3.currency = 'EUR'
+
+    mock_ib.accountValues.return_value = [val1, val2, val3]
+
+    balance = await adapter.get_wallet_balance()
+    assert balance == 500.0
+
+@pytest.mark.asyncio
+async def test_place_limit_order_outside_rth(mock_ib):
+    adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
+    adapter.ib = mock_ib
+
+    with patch('brokers.ibkr.order_builder.get_dynamic_exchange', return_value='SMART'):
+        await adapter.place_limit_order('TQQQ', 'BUY', 10, 50.0)
+
+        # Get the order passed to placeOrder
+        args, kwargs = mock_ib.placeOrder.call_args
+        order = args[1]
+
+        assert order.outsideRth is True
+        assert order.tif == 'GTC'

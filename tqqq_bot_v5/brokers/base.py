@@ -33,6 +33,9 @@ class BrokerBase(ABC):
     async def get_bid_ask(self, ticker: str) -> tuple[float, float]: ...
 
     @abstractmethod
+    async def get_wallet_balance(self) -> float: ...
+
+    @abstractmethod
     async def place_bracket_order(
         self, ticker: str, action: str,  # 'BUY' | 'SELL'
         qty: int, limit_price: float, profit_price: float,
