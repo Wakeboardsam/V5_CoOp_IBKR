@@ -62,10 +62,11 @@ class IBKRAdapter(BrokerBase):
         contract = Stock(ticker, 'SMART', 'USD')
         await self.ib.qualifyContractsAsync(contract)
 
-        # Request market data
-        ticker_data = self.ib.reqMktData(contract, '', False, False)
-
         try:
+            # Request market data
+            ticker_data = self.ib.reqMktData(contract, '', False, False)
+            logger.info(f"Raw price response: {ticker_data}")
+
             # Wait for price to be available (briefly)
             for _ in range(50): # up to 5 seconds
                 if ticker_data.last > 0:
@@ -76,7 +77,12 @@ class IBKRAdapter(BrokerBase):
             if ticker_data.close > 0:
                 return ticker_data.close
 
+            logger.error("API call returned empty — possible Gateway auth or subscription issue")
             raise RuntimeError(f"Could not get price for {ticker}")
+        except Exception as e:
+            if not isinstance(e, RuntimeError):
+                logger.error(f"Error fetching price: {e}")
+            raise
         finally:
             self.ib.cancelMktData(contract)
 
@@ -99,10 +105,23 @@ class IBKRAdapter(BrokerBase):
         """
         Returns the USD AvailableFunds from the account.
         """
-        for val in self.ib.accountValues():
-            if val.tag == 'AvailableFunds' and val.currency == 'USD':
-                return float(val.value)
-        return 0.0
+        try:
+            response = self.ib.accountValues()
+            logger.info(f"Raw balance response: {response}")
+            if not response:
+                logger.error("API call returned empty — possible Gateway auth or subscription issue")
+                return 0.0
+
+            for val in response:
+                if val.tag == 'AvailableFunds' and val.currency == 'USD':
+                    return float(val.value)
+
+            logger.error("API call returned empty — possible Gateway auth or subscription issue")
+            return 0.0
+        except Exception as e:
+            logger.error(f"Error fetching balance: {e}")
+            logger.error("API call returned empty — possible Gateway auth or subscription issue")
+            return 0.0
 
     async def place_limit_order(
         self, ticker: str, action: str,
