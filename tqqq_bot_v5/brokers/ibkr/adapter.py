@@ -22,7 +22,10 @@ class IBKRAdapter(BrokerBase):
         self.ib.orderStatusEvent += self._on_order_status
 
     async def connect(self) -> bool:
-        return await async_connect(self.ib, self.host, self.port, self.client_id)
+        connected = await async_connect(self.ib, self.host, self.port, self.client_id)
+        if connected:
+            self.ib.reqMarketDataType(3)
+        return connected
 
     async def disconnect(self):
         self.ib.disconnect()
@@ -103,21 +106,17 @@ class IBKRAdapter(BrokerBase):
 
     async def get_wallet_balance(self) -> float:
         """
-        Returns the USD AvailableFunds from the account.
+        Returns the USD TotalCashValue or TotalCashBalance from the account.
         """
         try:
-            response = self.ib.accountValues()
-            logger.info(f"Raw balance response: {response}")
-            if not response:
+            account_values = await self.ib.accountValuesAsync()
+            logger.info(f"Raw balance response: {account_values}")
+            balance = next((float(v.value) for v in account_values if v.tag in ['TotalCashValue', 'TotalCashBalance'] and v.currency == 'USD'), 0.0)
+
+            if balance == 0.0 and not account_values:
                 logger.error("API call returned empty — possible Gateway auth or subscription issue")
-                return 0.0
 
-            for val in response:
-                if val.tag == 'AvailableFunds' and val.currency == 'USD':
-                    return float(val.value)
-
-            logger.error("API call returned empty — possible Gateway auth or subscription issue")
-            return 0.0
+            return balance
         except Exception as e:
             logger.error(f"Error fetching balance: {e}")
             logger.error("API call returned empty — possible Gateway auth or subscription issue")
