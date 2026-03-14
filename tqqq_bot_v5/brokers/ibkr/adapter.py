@@ -49,6 +49,7 @@ class IBKRAdapter(BrokerBase):
                     )
                     if await self.is_connected():
                         logger.info("Watchdog successfully reconnected.")
+                        self.ib.reqMarketDataType(3)
                         return
                 except Exception as e:
                     logger.error(f"Reconnection attempt {attempt} failed: {e}")
@@ -111,7 +112,7 @@ class IBKRAdapter(BrokerBase):
         try:
             account_values = await self.ib.accountValuesAsync()
             logger.info(f"Raw balance response: {account_values}")
-            balance = next((float(v.value) for v in account_values if v.tag in ['TotalCashValue', 'TotalCashBalance'] and v.currency == 'USD'), 0.0)
+            balance = next((float(v.value) for v in account_values if v.tag == 'TotalCashValue' and v.currency == 'USD'), 0.0)
 
             if balance == 0.0 and not account_values:
                 logger.error("API call returned empty — possible Gateway auth or subscription issue")
