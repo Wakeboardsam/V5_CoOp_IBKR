@@ -130,6 +130,8 @@ async def test_market_data_cancellation(mock_ib):
     # Mock reqMktData to return a ticker with last price
     mock_ticker = MagicMock()
     mock_ticker.last = 50.0
+    mock_ticker.close = 0.0
+    mock_ticker.delayedLast = 0.0
     mock_ib.reqMktData.return_value = mock_ticker
     mock_ib.cancelMktData = MagicMock()
 
@@ -140,11 +142,34 @@ async def test_market_data_cancellation(mock_ib):
     mock_ib.cancelMktData.assert_called_once()
 
 @pytest.mark.asyncio
+async def test_get_price_fallbacks(mock_ib):
+    adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
+    adapter.ib = mock_ib
+
+    # Test close fallback
+    mock_ticker = MagicMock()
+    mock_ticker.last = 0.0
+    mock_ticker.close = 51.0
+    mock_ticker.delayedLast = 0.0
+    mock_ib.reqMktData.return_value = mock_ticker
+
+    price = await adapter.get_price('TQQQ')
+    assert price == 51.0
+
+    # Test delayedLast fallback
+    mock_ticker.last = 0.0
+    mock_ticker.close = 0.0
+    mock_ticker.delayedLast = 52.0
+
+    price = await adapter.get_price('TQQQ')
+    assert price == 52.0
+
+@pytest.mark.asyncio
 async def test_get_wallet_balance(mock_ib):
     adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
     adapter.ib = mock_ib
 
-    # Mock accountValuesAsync
+    # Mock accountValues
     val1 = MagicMock()
     val1.tag = 'NetLiquidation'
     val1.value = '1000.0'
@@ -160,7 +185,7 @@ async def test_get_wallet_balance(mock_ib):
     val3.value = '100.0'
     val3.currency = 'EUR'
 
-    mock_ib.accountValuesAsync = AsyncMock(return_value=[val1, val2, val3])
+    mock_ib.accountValues = MagicMock(return_value=[val1, val2, val3])
 
     balance = await adapter.get_wallet_balance()
     assert balance == 500.0
