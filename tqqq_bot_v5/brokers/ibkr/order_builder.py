@@ -17,15 +17,34 @@ def get_dynamic_exchange() -> str:
     # Check if time is >= 20:00 OR < 03:50
     current_time = now_et.time()
     if current_time >= datetime.time(20, 0) or current_time < datetime.time(3, 50):
+        # Additional check: Overnight market opens Sun 8 PM ET and closes Fri 3:50 AM ET
+        # Weekdays: Monday is 0, Sunday is 6.
+        # Friday (4) after 20:00 and Saturday (5) anytime are not OVERNIGHT.
+        # Sunday (6) before 20:00 is not OVERNIGHT.
+        weekday = now_et.weekday()
+        if weekday == 4 and current_time >= datetime.time(20, 0): # Friday evening
+            return 'SMART'
+        if weekday == 5: # Saturday
+            return 'SMART'
+        if weekday == 6 and current_time < datetime.time(20, 0): # Sunday before 8 PM
+            return 'SMART'
         return 'OVERNIGHT'
     return 'SMART'
+
+def get_dynamic_tif(exchange: str) -> str:
+    """
+    Returns 'OND' (Overnight + Day) for the OVERNIGHT exchange,
+    otherwise returns 'GTC'.
+    """
+    return 'OND' if exchange == 'OVERNIGHT' else 'GTC'
 
 def build_bracket_order(ib: IB, ticker: str, action: str, qty: int, limit_price: float, profit_price: float):
     """
     Creates a bracket order (parent limit + child take-profit).
-    Dynamically sets exchange, tif='GTC', and outsideRth=True.
+    Dynamically sets exchange, tif, and outsideRth=True.
     """
     exchange = get_dynamic_exchange()
+    tif = get_dynamic_tif(exchange)
     contract = Stock(ticker, exchange, 'USD')
 
     # ib.bracketOrder returns a list of Order objects: [parent, takeProfit, stopLoss]
@@ -75,7 +94,7 @@ def build_bracket_order(ib: IB, ticker: str, action: str, qty: int, limit_price:
     take_profit = bracket[1]
 
     for order in [parent, take_profit]:
-        order.tif = 'OND'
+        order.tif = tif
         order.outsideRth = True
 
     return contract, parent, take_profit

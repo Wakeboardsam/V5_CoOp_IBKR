@@ -50,7 +50,10 @@ async def test_place_bracket_order_rth_gtc(mock_ib):
 
         # Actually we should test the builder specifically for outsideRth and tif
         from brokers.ibkr.order_builder import build_bracket_order
-        c, p, t = build_bracket_order(mock_ib, 'TQQQ', 'BUY', 10, 50.0, 55.0)
+        # Mock the dynamic exchange and TIF so we know what they evaluate to
+        with patch('brokers.ibkr.order_builder.get_dynamic_exchange', return_value='OVERNIGHT'):
+            with patch('brokers.ibkr.order_builder.get_dynamic_tif', return_value='OND'):
+                c, p, t = build_bracket_order(mock_ib, 'TQQQ', 'BUY', 10, 50.0, 55.0)
 
         assert p.outsideRth is True
         assert p.tif == 'OND'
@@ -233,11 +236,12 @@ async def test_place_limit_order_outside_rth(mock_ib):
     adapter.ib = mock_ib
 
     with patch('brokers.ibkr.order_builder.get_dynamic_exchange', return_value='SMART'):
-        await adapter.place_limit_order('TQQQ', 'BUY', 10, 50.0)
+        with patch('brokers.ibkr.order_builder.get_dynamic_tif', return_value='GTC'):
+            await adapter.place_limit_order('TQQQ', 'BUY', 10, 50.0)
 
-        # Get the order passed to placeOrder
-        args, kwargs = mock_ib.placeOrder.call_args
-        order = args[1]
+            # Get the order passed to placeOrder
+            args, kwargs = mock_ib.placeOrder.call_args
+            order = args[1]
 
-        assert order.outsideRth is True
-        assert order.tif == 'OND'
+            assert order.outsideRth is True
+            assert order.tif == 'GTC'
