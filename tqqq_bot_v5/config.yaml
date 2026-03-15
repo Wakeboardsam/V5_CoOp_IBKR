@@ -13,9 +13,11 @@ options:
   ibkr_host: "127.0.0.1"
   ibkr_port: 7497
   ibkr_client_id: 1
-  poll_interval_seconds: 30
+  poll_interval_seconds: 60
   heartbeat_interval_seconds: 60
   health_log_interval_seconds: 300
+  anchor_buy_offset: 0.0
+  share_mismatch_mode: "halt"
   max_spread_pct: 0.5
   google_sheet_id: ""
   google_credentials_json: ""
@@ -30,6 +32,8 @@ schema:
   poll_interval_seconds: "int"
   heartbeat_interval_seconds: "int"
   health_log_interval_seconds: "int"
+  anchor_buy_offset: "float"
+  share_mismatch_mode: "list(halt|warn)"
   max_spread_pct: "float"
   google_sheet_id: "str"
   google_credentials_json: "str"
