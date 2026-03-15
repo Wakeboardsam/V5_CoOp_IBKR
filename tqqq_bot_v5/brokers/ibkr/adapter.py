@@ -71,15 +71,15 @@ class IBKRAdapter(BrokerBase):
             ticker_data = self.ib.reqMktData(contract, '', False, False)
             logger.info(f"Raw price response: {ticker_data}")
 
-            # Wait for price to be available (briefly)
-            for _ in range(50): # up to 5 seconds
-                if ticker_data.last > 0:
-                    return ticker_data.last
-                await asyncio.sleep(0.1)
+            # Wait for price to be available
+            await asyncio.sleep(2)
 
-            # Fallback to close price if last is not available
+            if ticker_data.last > 0:
+                return ticker_data.last
             if ticker_data.close > 0:
                 return ticker_data.close
+            if ticker_data.delayedLast > 0:
+                return ticker_data.delayedLast
 
             logger.error("API call returned empty — possible Gateway auth or subscription issue")
             raise RuntimeError(f"Could not get price for {ticker}")
@@ -110,7 +110,7 @@ class IBKRAdapter(BrokerBase):
         Returns the USD TotalCashValue or TotalCashBalance from the account.
         """
         try:
-            account_values = await self.ib.accountValuesAsync()
+            account_values = self.ib.accountValues()
             logger.info(f"Raw balance response: {account_values}")
             balance = next((float(v.value) for v in account_values if v.tag == 'TotalCashValue' and v.currency == 'USD'), 0.0)
 
