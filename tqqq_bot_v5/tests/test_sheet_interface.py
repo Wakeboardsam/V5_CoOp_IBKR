@@ -5,8 +5,11 @@ import asyncio
 from config.schema import AppConfig
 from sheets.interface import SheetInterface
 from sheets.schema import (
-    COL_STATUS, COL_STRATEGY, COL_SELL_PRICE, COL_BUY_PRICE, COL_SHARES
+    COL_STATUS, COL_STRATEGY, COL_SELL_PRICE, COL_BUY_PRICE, COL_SHARES,
+    ROW_HEARTBEAT, COL_HEARTBEAT, ROW_CASH, COL_CASH, ROW_ANCHOR_ASK, COL_ANCHOR_ASK,
+    GRID_TAB_NAME, FILLS_TAB_NAME, HEALTH_TAB_NAME, ERRORS_TAB_NAME
 )
+import gspread
 
 class TestSheetInterface(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -64,6 +67,52 @@ class TestSheetInterface(unittest.IsolatedAsyncioTestCase):
 
         mock_worksheet.update_cell.assert_called_once_with(10, COL_STATUS, "Working")
 
+    async def test_write_heartbeat(self):
+        mock_worksheet = MagicMock()
+        self.mock_sheet.worksheet.return_value = mock_worksheet
+
+        await self.interface.write_heartbeat("OK")
+
+        mock_worksheet.update_cell.assert_called_once_with(ROW_HEARTBEAT, COL_HEARTBEAT, "OK")
+
+    async def test_write_cash_value(self):
+        mock_worksheet = MagicMock()
+        self.mock_sheet.worksheet.return_value = mock_worksheet
+
+        await self.interface.write_cash_value(1234.56)
+
+        mock_worksheet.update_cell.assert_called_once_with(ROW_CASH, COL_CASH, 1234.56)
+
+    async def test_write_anchor_ask(self):
+        mock_worksheet = MagicMock()
+        self.mock_sheet.worksheet.return_value = mock_worksheet
+
+        await self.interface.write_anchor_ask(55.5)
+
+        mock_worksheet.update_cell.assert_called_once_with(ROW_ANCHOR_ASK, COL_ANCHOR_ASK, 55.5)
+
+    async def test_unauthorized_write_grid(self):
+        mock_worksheet = MagicMock()
+        self.mock_sheet.worksheet.return_value = mock_worksheet
+
+        # Column D (COL_STRATEGY) is not authorized for write
+        with self.assertRaises(ValueError) as cm:
+            await self.interface._update_cell_with_guard(GRID_TAB_NAME, 7, COL_STRATEGY, "Y")
+
+        self.assertIn("Unauthorized write attempt", str(cm.exception))
+
+    async def test_unauthorized_worksheet(self):
+        with self.assertRaises(ValueError) as cm:
+            await self.interface._update_cell_with_guard("UnknownTab", 1, 1, "data")
+
+        self.assertIn("Unauthorized worksheet", str(cm.exception))
+
+    async def test_append_only_guard(self):
+        with self.assertRaises(ValueError) as cm:
+            await self.interface._update_cell_with_guard(FILLS_TAB_NAME, 1, 1, "data")
+
+        self.assertIn("Use append_row", str(cm.exception))
+
     async def test_log_fill_success(self):
         mock_worksheet = MagicMock()
         self.mock_sheet.worksheet.return_value = mock_worksheet
@@ -95,3 +144,12 @@ class TestSheetInterface(unittest.IsolatedAsyncioTestCase):
         mock_worksheet.append_row.assert_called_once()
         args = mock_worksheet.append_row.call_args[0][0]
         self.assertEqual(args[1], "Test error")
+
+    async def test_log_error_missing_worksheet(self):
+        self.mock_sheet.worksheet.side_effect = gspread.exceptions.WorksheetNotFound
+
+        with patch('sheets.interface.logger') as mock_logger:
+            result = await self.interface.log_error("Test error")
+
+            self.assertFalse(result)
+            mock_logger.error.assert_any_call("Worksheet 'Errors' not found in the spreadsheet.")

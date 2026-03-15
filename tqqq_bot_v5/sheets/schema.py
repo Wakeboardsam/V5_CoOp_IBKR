@@ -1,6 +1,7 @@
 GRID_TAB_NAME = "TQQQ_Tracker"
 FILLS_TAB_NAME = "Fills"
 HEALTH_TAB_NAME = "Health"
+ERRORS_TAB_NAME = "Errors"
 
 # Grid Tab Columns (1-based index for gspread)
 COL_STATUS = 3        # Column C
@@ -8,6 +9,18 @@ COL_STRATEGY = 4      # Column D - formula driven "Y"
 COL_SELL_PRICE = 6    # Column F
 COL_BUY_PRICE = 7     # Column G
 COL_SHARES = 8        # Column H
+
+# Special Cells
+ROW_HEARTBEAT = 1
+COL_HEARTBEAT = 3     # C1
+ROW_CASH = 2
+COL_CASH = 3          # C2
+ROW_ANCHOR_ASK = 7
+COL_ANCHOR_ASK = 7    # G7
+
+# Grid boundaries
+GRID_START_ROW = 7
+GRID_END_ROW = 100
 
 # Fills Tab Columns
 COL_TIMESTAMP = "TIMESTAMP"
