@@ -136,3 +136,70 @@ async def test_heartbeat_periodic(mock_broker, mock_sheet, config):
         task.cancel()
 
     assert mock_sheet.write_heartbeat.call_count >= 1
+
+@pytest.mark.asyncio
+async def test_anchor_acquisition(mock_broker, mock_sheet, config):
+    # distal_y == 0 condition
+    grid_state = GridState(
+        rows={
+            7: GridRow(row_index=7, status="IDLE", has_y=False, sell_price=105.0, buy_price=100.0, shares=10),
+            8: GridRow(row_index=8, status="IDLE", has_y=False, sell_price=110.0, buy_price=105.0, shares=10)
+        }
+    )
+    mock_sheet.fetch_grid.return_value = grid_state
+    mock_broker.get_positions.return_value = {"TQQQ": 0}
+    mock_broker.get_wallet_balance.return_value = 50000.0
+    mock_broker.get_bid_ask.return_value = (99.9, 100.0)
+    config.anchor_buy_offset = 0.05
+
+    engine = GridEngine(mock_broker, mock_sheet, config)
+    await engine._tick()
+
+    # Should write anchor ask to G7
+    mock_sheet.write_anchor_ask.assert_called_with(100.0)
+
+    # Should place buy order at ask + offset (100.0 + 0.05 = 100.05)
+    mock_broker.place_limit_order.assert_any_call(
+        ticker="TQQQ", action="BUY", qty=10, limit_price=100.05, on_fill=engine._on_fill
+    )
+
+@pytest.mark.asyncio
+async def test_no_anchor_write_if_owned(mock_broker, mock_sheet, config):
+    # distal_y > 0 condition
+    grid_state = GridState(
+        rows={
+            7: GridRow(row_index=7, status="OWNED", has_y=True, sell_price=105.0, buy_price=100.0, shares=10),
+            8: GridRow(row_index=8, status="IDLE", has_y=False, sell_price=110.0, buy_price=105.0, shares=10)
+        }
+    )
+    mock_sheet.fetch_grid.return_value = grid_state
+    mock_broker.get_positions.return_value = {"TQQQ": 10}
+    mock_broker.get_wallet_balance.return_value = 50000.0
+
+    engine = GridEngine(mock_broker, mock_sheet, config)
+    await engine._tick()
+
+    # Should NOT write anchor ask to G7
+    mock_sheet.write_anchor_ask.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_no_anchor_write_if_already_working(mock_broker, mock_sheet, config):
+    # Row 7 already has a WORKING_BUY in status, even if distal_y is 0
+    grid_state = GridState(
+        rows={
+            7: GridRow(row_index=7, status="WORKING_BUY:ORD-1", has_y=False, sell_price=105.0, buy_price=100.0, shares=10),
+            8: GridRow(row_index=8, status="IDLE", has_y=False, sell_price=110.0, buy_price=105.0, shares=10)
+        }
+    )
+    mock_sheet.fetch_grid.return_value = grid_state
+    mock_broker.get_positions.return_value = {"TQQQ": 0}
+    mock_broker.get_wallet_balance.return_value = 50000.0
+    mock_broker.get_open_orders.return_value = [{'order_id': 'ORD-1', 'limit_price': 100.0, 'qty': 10, 'action': 'BUY'}]
+
+    engine = GridEngine(mock_broker, mock_sheet, config)
+    await engine._tick()
+
+    # Should NOT write anchor ask to G7
+    mock_sheet.write_anchor_ask.assert_not_called()
+    # Should NOT place a new order
+    assert mock_broker.place_limit_order.call_count == 0

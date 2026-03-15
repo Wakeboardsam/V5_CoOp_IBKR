@@ -212,10 +212,24 @@ class GridEngine:
                 elif row.row_index > distal_y:
                     # Expect active BUY order
                     if not self.order_manager.has_open_buy(row.row_index):
-                        logger.info(f"Placing missing BUY for empty row {row.row_index}")
+                        buy_price = row.buy_price
+
+                        if row.row_index == 7 and distal_y == 0:
+                            # Anchor acquisition!
+                            logger.info("Anchor acquisition condition met for row 7")
+                            bid, ask = await self.broker.get_bid_ask(TICKER)
+                            if self.spread_guard.is_too_wide(bid, ask):
+                                continue
+
+                            await self.sheet.write_anchor_ask(ask)
+                            buy_price = ask + self.config.anchor_buy_offset
+                            logger.info(f"Placing anchor BUY for row 7 at {buy_price} (ask: {ask}, offset: {self.config.anchor_buy_offset})")
+                        else:
+                            logger.info(f"Placing missing BUY for empty row {row.row_index}")
+
                         result = await self.broker.place_limit_order(
                             ticker=TICKER, action='BUY', qty=row.shares,
-                            limit_price=row.buy_price, on_fill=self._on_fill
+                            limit_price=buy_price, on_fill=self._on_fill
                         )
                         if result.status == 'submitted':
                             self.order_manager.track(row.row_index, result, 'BUY')
