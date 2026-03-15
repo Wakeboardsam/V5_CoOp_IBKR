@@ -213,7 +213,6 @@ class GridEngine:
                         if result.status == 'submitted':
                             self.order_manager.track(row.row_index, result, 'SELL')
                             new_status = f"WORKING_SELL:{result.order_id}"
-                            if owned_id: new_status += f"|OWNED:{owned_id}"
                             await self.sheet.update_row_status(row.row_index, new_status)
                 elif row.row_index > distal_y:
                     if mismatch_active:
@@ -256,7 +255,7 @@ class GridEngine:
 
                 # Update status
                 if row.has_y:
-                    new_status = f"OWNED:{owned_id}" if owned_id else "OWNED"
+                    new_status = f"OWNED:{owned_id if owned_id else 0}"
                     if row.status != new_status:
                         await self.sheet.update_row_status(row.row_index, new_status)
                 else:
