@@ -102,3 +102,41 @@ async def test_retrack_from_status(mock_broker, mock_sheet, config):
     # But it should be tracked now
     assert engine.order_manager.is_tracked("ORD-EXISTING")
     assert engine.order_manager.has_open_buy(8)
+
+@pytest.mark.asyncio
+async def test_anchor_buy_offset(mock_broker, mock_sheet, config):
+    config.anchor_buy_offset = 0.5
+    mock_broker.get_price.return_value = 100.0
+    engine = GridEngine(mock_broker, mock_sheet, config)
+    await engine._tick()
+    mock_sheet.write_anchor_ask.assert_called_with(100.5)
+
+@pytest.mark.asyncio
+async def test_share_mismatch_warn(mock_broker, mock_sheet, config):
+    config.share_mismatch_mode = "warn"
+    mock_broker.get_positions.return_value = {"TQQQ": 500} # Mismatch
+    mock_broker.get_price.return_value = 100.0
+    engine = GridEngine(mock_broker, mock_sheet, config)
+
+    await engine._tick()
+
+    # Should HAVE called place_limit_order because it didn't halt
+    assert mock_broker.place_limit_order.call_count > 0
+    # Should NOT have called log_error (only critical/halt logs to sheet)
+    mock_sheet.log_error.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_heartbeat_periodic(mock_broker, mock_sheet, config):
+    config.heartbeat_interval_seconds = 0.01
+    engine = GridEngine(mock_broker, mock_sheet, config)
+
+    # Run heartbeat task for a short time
+    task = asyncio.create_task(engine._heartbeat_periodic())
+    await asyncio.sleep(0.05)
+    engine._shutdown_event.set()
+    try:
+        await asyncio.wait_for(task, timeout=1.0)
+    except asyncio.TimeoutError:
+        task.cancel()
+
+    assert mock_sheet.write_heartbeat.call_count >= 1
