@@ -97,19 +97,19 @@ class TestSheetInterface(unittest.IsolatedAsyncioTestCase):
 
         # Column D (COL_STRATEGY) is not authorized for write
         with self.assertRaises(ValueError) as cm:
-            await self.interface._update_cell_with_guard(GRID_TAB_NAME, 7, COL_STRATEGY, "Y")
+            self.interface._update_cell_with_guard(GRID_TAB_NAME, 7, COL_STRATEGY, "Y")
 
         self.assertIn("Unauthorized write attempt", str(cm.exception))
 
     async def test_unauthorized_worksheet(self):
         with self.assertRaises(ValueError) as cm:
-            await self.interface._update_cell_with_guard("UnknownTab", 1, 1, "data")
+            self.interface._update_cell_with_guard("UnknownTab", 1, 1, "data")
 
         self.assertIn("Unauthorized worksheet", str(cm.exception))
 
     async def test_append_only_guard(self):
         with self.assertRaises(ValueError) as cm:
-            await self.interface._update_cell_with_guard(FILLS_TAB_NAME, 1, 1, "data")
+            self.interface._update_cell_with_guard(FILLS_TAB_NAME, 1, 1, "data")
 
         self.assertIn("Use append_row", str(cm.exception))
 
