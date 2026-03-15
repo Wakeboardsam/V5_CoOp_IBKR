@@ -165,30 +165,67 @@ async def test_get_price_fallbacks(mock_ib):
     assert price == 52.0
 
 @pytest.mark.asyncio
-async def test_get_wallet_balance(mock_ib):
+async def test_get_wallet_balance_selection_settled(mock_ib):
     adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
     adapter.ib = mock_ib
 
-    # Mock accountValues
-    val1 = MagicMock()
-    val1.tag = 'NetLiquidation'
-    val1.value = '1000.0'
-    val1.currency = 'USD'
+    # Mock accountValues: SettledCash should win
+    v1 = MagicMock(tag='NetLiquidation', value='1000.0', currency='USD')
+    v2 = MagicMock(tag='TotalCashValue', value='500.0', currency='USD')
+    v3 = MagicMock(tag='SettledCash', value='400.0', currency='USD')
+    v4 = MagicMock(tag='SettledCash', value='300.0', currency='EUR')
 
-    val2 = MagicMock()
-    val2.tag = 'TotalCashValue'
-    val2.value = '500.0'
-    val2.currency = 'USD'
+    mock_ib.accountValues.return_value = [v1, v2, v3, v4]
 
-    val3 = MagicMock()
-    val3.tag = 'TotalCashBalance'
-    val3.value = '100.0'
-    val3.currency = 'EUR'
+    balance = await adapter.get_wallet_balance()
+    assert balance == 400.0
+    assert adapter._selected_cash_tag == 'SettledCash'
 
-    mock_ib.accountValues = MagicMock(return_value=[val1, val2, val3])
+@pytest.mark.asyncio
+async def test_get_wallet_balance_selection_fallback_total(mock_ib):
+    adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
+    adapter.ib = mock_ib
+
+    # No settled tag, TotalCashValue should win
+    v1 = MagicMock(tag='NetLiquidation', value='1000.0', currency='USD')
+    v2 = MagicMock(tag='TotalCashValue', value='500.0', currency='USD')
+    v3 = MagicMock(tag='TotalCashBalance', value='450.0', currency='USD')
+
+    mock_ib.accountValues.return_value = [v1, v2, v3]
 
     balance = await adapter.get_wallet_balance()
     assert balance == 500.0
+    assert adapter._selected_cash_tag == 'TotalCashValue'
+
+@pytest.mark.asyncio
+async def test_get_wallet_balance_selection_fallback_balance(mock_ib):
+    adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
+    adapter.ib = mock_ib
+
+    # Only TotalCashBalance available
+    v1 = MagicMock(tag='NetLiquidation', value='1000.0', currency='USD')
+    v2 = MagicMock(tag='TotalCashBalance', value='450.0', currency='USD')
+
+    mock_ib.accountValues.return_value = [v1, v2]
+
+    balance = await adapter.get_wallet_balance()
+    assert balance == 450.0
+    assert adapter._selected_cash_tag == 'TotalCashBalance'
+
+@pytest.mark.asyncio
+async def test_get_wallet_balance_no_match(mock_ib):
+    adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
+    adapter.ib = mock_ib
+
+    # No preferred tags
+    v1 = MagicMock(tag='NetLiquidation', value='1000.0', currency='USD')
+    v2 = MagicMock(tag='BuyingPower', value='2000.0', currency='USD')
+
+    mock_ib.accountValues.return_value = [v1, v2]
+
+    balance = await adapter.get_wallet_balance()
+    assert balance == 0.0
+    assert adapter._selected_cash_tag is None
 
 @pytest.mark.asyncio
 async def test_place_limit_order_outside_rth(mock_ib):
