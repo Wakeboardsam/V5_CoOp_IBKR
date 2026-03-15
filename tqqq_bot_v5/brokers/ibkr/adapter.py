@@ -160,7 +160,7 @@ class IBKRAdapter(BrokerBase):
         await self.ib.qualifyContractsAsync(contract)
 
         order = LimitOrder(action, qty, limit_price)
-        order.tif = 'GTC'
+        order.tif = 'OND'
         order.outsideRth = True
 
         self.ib.placeOrder(contract, order)

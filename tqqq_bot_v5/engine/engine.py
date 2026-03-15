@@ -1,7 +1,8 @@
 import asyncio
 import logging
 import signal
-from datetime import datetime
+from datetime import datetime, time
+import zoneinfo
 from typing import Optional
 
 from brokers.base import BrokerBase, OrderResult
@@ -28,6 +29,8 @@ class GridEngine:
         self.last_price = 0.0
         self.last_fill_time: Optional[datetime] = None
         self._shutdown_event = asyncio.Event()
+        tz = zoneinfo.ZoneInfo("America/New_York")
+        self._last_grid_regeneration = datetime.min.replace(tzinfo=tz)
 
     async def run(self):
         logger.info("Starting GridEngine run loop")
@@ -129,9 +132,61 @@ class GridEngine:
             except asyncio.TimeoutError:
                 pass
 
+
+    async def _check_daily_grid_regeneration(self):
+        """
+        Check if we have crossed 8:00 PM ET to regenerate the grid.
+        Skip the regeneration between Friday 4:00 PM ET and Sunday 8:00 PM ET.
+        """
+        tz = zoneinfo.ZoneInfo("America/New_York")
+        now_et = datetime.now(tz)
+
+        # Define the target regeneration time (8:00 PM ET)
+        target_time = time(20, 0)
+
+        # We consider a regeneration valid if it happens on or after 8:00 PM ET
+        # and we haven't regenerated yet for this "trading day"
+
+        # Determine the "trading day" start for the current time
+        if now_et.time() >= target_time:
+            current_session_start = datetime.combine(now_et.date(), target_time, tzinfo=tz)
+        else:
+            # It's before 8:00 PM ET, so the current session started yesterday
+            # Wait, timedelta doesn't easily subtract from datetime with zoneinfo in a clean way without importing timedelta.
+            from datetime import timedelta
+            current_session_start = datetime.combine((now_et - timedelta(days=1)).date(), target_time, tzinfo=tz)
+
+        # Weekend Check:
+        # Friday is weekday() == 4, Sunday is weekday() == 6
+        # The weekend gap is between Friday 4:00 PM ET and Sunday 8:00 PM ET.
+        # But specifically, we just want to avoid regenerating on Friday night or Saturday night.
+        # So if current_session_start is Friday 8:00 PM (weekday 4) or Saturday 8:00 PM (weekday 5), skip.
+        if current_session_start.weekday() in (4, 5):
+            return
+
+        if self._last_grid_regeneration < current_session_start:
+            logger.info(f"Daily 8:00 PM ET threshold crossed (Session start: {current_session_start}). Regenerating grid.")
+
+            # Clear internally tracked orders.
+            # OND orders expire automatically at 4:00 PM ET, so we don't strictly need to cancel them with the broker,
+            # but we need to clear our internal tracking so the engine will re-place them.
+            self.order_manager = OrderManager()  # Reset order manager
+
+            # Also reset sheet statuses to IDLE for working orders so they get picked up?
+            # The tick loop will do that anyway if we clear them here, actually the tick loop
+            # will see them in the window but not tracked, and might try to re-track them if
+            # they are still in broker's open_orders.
+            # However, since it's 8:00 PM ET, broker's open orders from the daytime OND should be expired/gone.
+            # If there's any discrepancy, the reconciliation will handle it.
+
+            self._last_grid_regeneration = now_et
+
     async def _tick(self):
         # 0. Watchdog: ensure connection
         await self.broker.ensure_connected()
+
+        # 0.0 Daily Grid Regeneration Check
+        await self._check_daily_grid_regeneration()
 
         # 0.1 Diagnostic: fetch balance and price
         try:

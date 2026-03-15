@@ -53,9 +53,9 @@ async def test_place_bracket_order_rth_gtc(mock_ib):
         c, p, t = build_bracket_order(mock_ib, 'TQQQ', 'BUY', 10, 50.0, 55.0)
 
         assert p.outsideRth is True
-        assert p.tif == 'GTC'
+        assert p.tif == 'OND'
         assert t.outsideRth is True
-        assert t.tif == 'GTC'
+        assert t.tif == 'OND'
 
 @pytest.mark.parametrize("current_time,expected_exchange", [
     (datetime.time(10, 0), "SMART"),      # 10 AM ET -> SMART
@@ -240,4 +240,4 @@ async def test_place_limit_order_outside_rth(mock_ib):
         order = args[1]
 
         assert order.outsideRth is True
-        assert order.tif == 'GTC'
+        assert order.tif == 'OND'

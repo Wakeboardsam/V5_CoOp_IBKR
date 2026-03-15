@@ -75,7 +75,7 @@ def build_bracket_order(ib: IB, ticker: str, action: str, qty: int, limit_price:
     take_profit = bracket[1]
 
     for order in [parent, take_profit]:
-        order.tif = 'GTC'
+        order.tif = 'OND'
         order.outsideRth = True
 
     return contract, parent, take_profit
