@@ -137,7 +137,6 @@ class GridEngine:
             balance = await self.broker.get_wallet_balance()
             price = await self.broker.get_price(TICKER)
             self.last_price = price
-            await self.sheet.write_anchor_ask(self.last_price + self.config.anchor_buy_offset)
             if balance == 0 or price == 0:
                 logger.error("API call returned empty — possible Gateway auth or subscription issue")
         except Exception as e:
@@ -159,9 +158,9 @@ class GridEngine:
             if self.config.share_mismatch_mode == "halt":
                 logger.critical(msg)
                 await self.sheet.log_error(msg)
-                return
             else:
                 logger.warning(msg)
+            return
 
         # 3. Calculate Window
         distal_y = self.grid_state.distal_y_row
