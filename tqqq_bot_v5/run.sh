@@ -2,6 +2,7 @@
 echo "Parsing Home Assistant options..."
 IBKR_USER=$(jq -r '.ibkr_username // empty' /data/options.json)
 IBKR_PASS=$(jq -r '.ibkr_password // empty' /data/options.json)
+export IBKR_PORT=$(jq -r '.ibkr_port // 7497' /data/options.json)
 PAPER_FLAG=$(jq -r '.paper_trading' /data/options.json)
 TRADING_MODE="paper"
 if [ "$PAPER_FLAG" = "false" ]; then
@@ -15,7 +16,7 @@ IbPassword=${IBKR_PASS}
 TradingMode=${TRADING_MODE}
 IbDir=/root/Jts
 ReadOnlyApi=no
-OverrideTwsApiPort=7497
+OverrideTwsApiPort=${IBKR_PORT}
 AcceptIncomingConnectionAction=accept
 AcceptNonBrokerageAccountWarning=yes
 EOF

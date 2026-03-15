@@ -2,7 +2,7 @@ import pytest
 import json
 import os
 from pydantic import ValidationError
-from config.loader import load_config
+from config.loader import load_config, validate_ibkr_settings
 from config.schema import AppConfig
 
 
@@ -41,3 +41,61 @@ def test_missing_google_sheet_id(tmp_path):
 
     assert e.type == SystemExit
     assert e.value.code == 1
+
+
+def test_validate_ibkr_settings_paper_correct():
+    config = AppConfig(
+        google_sheet_id="id",
+        google_credentials_json="{}",
+        paper_trading=True,
+        ibkr_port=7497
+    )
+    warnings = validate_ibkr_settings(config)
+    assert len(warnings) == 0
+
+
+def test_validate_ibkr_settings_live_correct():
+    config = AppConfig(
+        google_sheet_id="id",
+        google_credentials_json="{}",
+        paper_trading=False,
+        ibkr_port=7496
+    )
+    warnings = validate_ibkr_settings(config)
+    assert len(warnings) == 0
+
+
+def test_validate_ibkr_settings_paper_inconsistent():
+    config = AppConfig(
+        google_sheet_id="id",
+        google_credentials_json="{}",
+        paper_trading=True,
+        ibkr_port=7496
+    )
+    warnings = validate_ibkr_settings(config)
+    assert len(warnings) == 1
+    assert "paper_trading=True but ibkr_port=7496" in warnings[0]
+
+
+def test_validate_ibkr_settings_live_inconsistent():
+    config = AppConfig(
+        google_sheet_id="id",
+        google_credentials_json="{}",
+        paper_trading=False,
+        ibkr_port=7497
+    )
+    warnings = validate_ibkr_settings(config)
+    assert len(warnings) == 1
+    assert "paper_trading=False (LIVE) but ibkr_port=7497" in warnings[0]
+
+
+def test_validate_ibkr_settings_custom_port():
+    config = AppConfig(
+        google_sheet_id="id",
+        google_credentials_json="{}",
+        paper_trading=True,
+        ibkr_port=4001
+    )
+    warnings = validate_ibkr_settings(config)
+    assert len(warnings) == 1
+    assert "paper_trading=True but ibkr_port=4001" in warnings[0]
