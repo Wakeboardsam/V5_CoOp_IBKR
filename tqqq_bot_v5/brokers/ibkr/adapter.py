@@ -17,6 +17,7 @@ class IBKRAdapter(BrokerBase):
         self.paper = paper
         self.ib = IB()
         self._on_fill_callbacks: dict[str, Callable] = {}
+        self._selected_cash_tag: Optional[str] = None
 
         # Subscribe to order status events
         self.ib.orderStatusEvent += self._on_order_status
@@ -107,20 +108,44 @@ class IBKRAdapter(BrokerBase):
 
     async def get_wallet_balance(self) -> float:
         """
-        Returns the USD TotalCashValue or TotalCashBalance from the account.
+        Returns the USD balance from the selected conservative account tag.
         """
         try:
             account_values = self.ib.accountValues()
-            logger.info(f"Raw balance response: {account_values}")
-            balance = next((float(v.value) for v in account_values if v.tag == 'TotalCashValue' and v.currency == 'USD'), 0.0)
-
-            if balance == 0.0 and not account_values:
+            if not account_values:
                 logger.error("API call returned empty — possible Gateway auth or subscription issue")
+                return 0.0
 
-            return balance
+            # Filter for USD only
+            usd_values = [v for v in account_values if v.currency == 'USD']
+
+            if not self._selected_cash_tag:
+                # 1. Search for "Settled" (case-insensitive)
+                settled_tag = next((v.tag for v in usd_values if "settled" in v.tag.lower()), None)
+                if settled_tag:
+                    self._selected_cash_tag = settled_tag
+                else:
+                    # 2. Fallback to confirmed tags
+                    for fallback in ["TotalCashValue", "TotalCashBalance"]:
+                        if any(v.tag == fallback for v in usd_values):
+                            self._selected_cash_tag = fallback
+                            break
+
+                if self._selected_cash_tag:
+                    logger.info(f"Selected IBKR cash field: {self._selected_cash_tag}")
+                else:
+                    available_tags = [v.tag for v in usd_values]
+                    logger.warning(f"No preferred conservative cash tags found. Available USD tags: {available_tags}")
+                    return 0.0
+
+            # Retrieve value for the selected tag
+            balance_entry = next((v for v in usd_values if v.tag == self._selected_cash_tag), None)
+            if balance_entry:
+                return float(balance_entry.value)
+
+            return 0.0
         except Exception as e:
             logger.error(f"Error fetching balance: {e}")
-            logger.error("API call returned empty — possible Gateway auth or subscription issue")
             return 0.0
 
     async def place_limit_order(
