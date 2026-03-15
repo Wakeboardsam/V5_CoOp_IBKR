@@ -1,7 +1,7 @@
 import sys
 import asyncio
 import logging
-from config.loader import load_config
+from config.loader import load_config, validate_ibkr_settings
 from brokers.ibkr.adapter import IBKRAdapter
 from brokers.schwab.adapter import SchwabAdapter
 from engine.engine import GridEngine
@@ -21,6 +21,11 @@ async def main():
     except Exception as e:
         print(f"Error loading config: {e}", file=sys.stderr)
         sys.exit(1)
+
+    # Perform IBKR port/mode validation
+    ibkr_warnings = validate_ibkr_settings(config)
+    for warning in ibkr_warnings:
+        logger.warning(warning)
 
     if config.active_broker == "ibkr":
         broker = IBKRAdapter(
