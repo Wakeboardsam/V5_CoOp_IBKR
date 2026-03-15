@@ -1,13 +1,13 @@
-# TQQQ Grid Trading Bot
+# TQQQ Grid Trading Bot v5
 
-An automated grid trading bot for TQQQ, designed for 24/7 unattended operation with IBKR (Interactive Brokers) support and Google Sheets as the control interface.
+An automated grid trading bot for TQQQ, designed for 24/7 unattended operation with IBKR (Interactive Brokers) support and Google Sheets as the control interface. V5 implements an asynchronous engine with a 7-level sliding window and strict state management.
 
 ## Setup Instructions
 
 1.  **Google Sheets Setup**:
     *   Create a new Google Sheet.
-    *   Create four tabs: `Grid`, `Fills`, `Errors`, and `Health`.
-    *   Set up headers for each tab as described in the [Schema](#google-sheet-schema) section.
+    *   Create four tabs: `TQQQ_Tracker`, `Fills`, `Errors`, and `Health`.
+    *   Set up the `TQQQ_Tracker` tab using the legacy v4 layout (Data starting at Row 7).
     *   Create a Google Cloud Project, enable the Google Sheets and Drive APIs, and create a Service Account.
     *   Download the Service Account JSON credentials.
     *   Share the Google Sheet with the Service Account's email address (with Editor permissions).
@@ -19,58 +19,52 @@ An automated grid trading bot for TQQQ, designed for 24/7 unattended operation w
 3.  **Broker Setup (IBKR)**:
     *   Ensure IB Gateway or TWS is running and the API is enabled.
     *   Default port for paper trading is `7497`, and live trading is `7496`.
+    *   The bot uses delayed market data (Type 3) by default.
 
 4.  **Running the Bot**:
     ```bash
-    pip install -r requirements.txt
-    python3 main.py
+    pip install -r tqqq_bot_v5/requirements.txt
+    PYTHONPATH=tqqq_bot_v5 python3 tqqq_bot_v5/main.py
     ```
+
+## Core Features (v5)
+
+*   **7-Level Sliding Window**: Trading is constrained to a 7-level window centered on the highest owned row (`distal_y_row +/- 3`), with a minimum index of Row 7.
+*   **Share Mismatch Circuit Breaker**: Compares broker positions against the grid sheet. Modes: `halt` (stops the engine) or `warn` (logs error but continues housekeeping, skipping new BUY orders).
+*   **Anchor Acquisition**: Automated acquisition of the first level (Row 7) using market `ask` price plus an optional offset when no shares are owned.
+*   **Spread Guard**: Prevents trading when the bid-ask spread exceeds a configurable percentage.
+*   **Graceful Shutdown**: Cancels all tracked GTC orders on SIGTERM before disconnecting.
 
 ## Google Sheet Schema
 
-### `Grid` Tab
-The bot reads its configuration from this tab.
+### `TQQQ_Tracker` Tab (Legacy Layout)
+The bot reads its state from this tab and writes status updates. Data begins at **Row 7**.
 
-| Column | Description |
-| :--- | :--- |
-| `ROW_ID` | Unique identifier for the grid level. |
-| `TYPE` | `BUY` or `SELL`. |
-| `TRIGGER_PRICE` | The price at which the order should be placed. |
-| `LIMIT_PRICE` | The limit price for the order. |
-| `QUANTITY` | Number of shares to trade. |
-| `ACTIVE` | `TRUE` to enable this level, anything else to ignore. |
-| `NOTES` | Optional notes. |
+| Column | Name | Description | Bot Access |
+| :--- | :--- | :--- | :--- |
+| **C** | `Status` | `WORKING_BUY:ID`, `WORKING_SELL:ID`, `OWNED:ID`, or `IDLE`. | **Read/Write** |
+| **D** | `Strategy` | User formula; must return `Y` if the level is owned. | **Read Only** |
+| **F** | `Sell Price` | Target price to sell shares for this level. | **Read Only** |
+| **G** | `Buy Price` | Target price to buy shares for this level. | **Read Only** |
+| **H** | `Shares` | Number of shares for this level. | **Read Only** |
 
-### `Fills` Tab
+**Approved Write Surface (TQQQ_Tracker):**
+*   `C1`: Heartbeat timestamp.
+*   `C2`: Current wallet balance (USD).
+*   `G7`: Anchor ask price (written only during anchor acquisition).
+*   `C7:C100`: Order status tracking.
+
+### `Fills` Tab (Append Only)
 Logs executed trades.
+Columns: `TIMESTAMP`, `ROW_ID`, `TYPE`, `FILLED_PRICE`, `FILLED_QTY`, `ORDER_ID`.
 
-| Column | Description |
-| :--- | :--- |
-| `TIMESTAMP` | Time of the fill. |
-| `ROW_ID` | The ID from the Grid tab. |
-| `TYPE` | `BUY` or `SELL`. |
-| `FILLED_PRICE` | The actual execution price. |
-| `FILLED_QTY` | The number of shares filled. |
-| `ORDER_ID` | The broker's order ID. |
+### `Health` Tab (Append Only)
+Logs periodic health snapshots.
+Columns: `TIMESTAMP`, `LAST_PRICE`, `OPEN_ORDERS_COUNT`, `LAST_FILL_TIME`, `STATUS`.
 
-### `Health` Tab
-Logs periodic heartbeat and status (every 5 minutes).
-
-| Column | Description |
-| :--- | :--- |
-| `TIMESTAMP` | Time of the health check. |
-| `LAST_PRICE` | Last observed market price. |
-| `OPEN_ORDERS_COUNT` | Number of active orders at the broker. |
-| `LAST_FILL_TIME` | Timestamp of the last successful fill. |
-| `STATUS` | Bot status (e.g., `Running`). |
-
-### `Errors` Tab
-Logs any runtime errors.
-
-| Column | Description |
-| :--- | :--- |
-| `TIMESTAMP` | Time of the error. |
-| `ERROR_MSG` | Detailed error message. |
+### `Errors` Tab (Append Only)
+Logs runtime errors and circuit breaker events.
+Columns: `TIMESTAMP`, `ERROR_MSG`.
 
 ## options.json Reference
 
@@ -81,24 +75,20 @@ Logs any runtime errors.
 | `ibkr_host` | string | `127.0.0.1` | Host for IB Gateway/TWS. |
 | `ibkr_port` | integer | `7497` | Port for IB Gateway/TWS. |
 | `ibkr_client_id` | integer | `1` | API Client ID. |
-| `poll_interval_seconds` | integer | `10` | How often to check for triggers. |
+| `poll_interval_seconds` | integer | `60` | Main engine tick interval. |
+| `heartbeat_interval_seconds`| integer | `60` | Frequency of `C1` heartbeat updates. |
+| `health_log_interval_seconds`| integer | `300` | Frequency of `Health` tab appends. |
+| `anchor_buy_offset` | float | `0.0` | Offset added to `ask` for anchor acquisition. |
+| `share_mismatch_mode` | string | `halt` | `halt` or `warn` on position discrepancy. |
 | `max_spread_pct` | float | `0.5` | Max allowed bid-ask spread % to trade. |
 | `google_sheet_id` | string | (Required) | The ID from the Google Sheet URL. |
 | `google_credentials_json`| string | (Required) | The full JSON content of the service account key. |
 
 ## Paper-to-Live Promotion Checklist
 
-- [ ] Verify all grid levels in the `Grid` tab are correct for live trading.
+- [ ] Verify all grid levels in `TQQQ_Tracker` are correct for live trading.
 - [ ] Update `google_sheet_id` if using a separate sheet for live.
 - [ ] Set `paper_trading` to `false` in `options.json`.
 - [ ] Update `ibkr_port` to the live port (usually `7496`).
 - [ ] Ensure the live account has sufficient permissions and market data subscriptions for TQQQ.
 - [ ] Test the connection with a single small order first.
-
-## Broker Swap Instructions
-
-To swap brokers (e.g., when Schwab support is fully implemented):
-1.  Update `active_broker` in `options.json` to the new broker name (e.g., `schwab`).
-2.  Add any broker-specific configuration to `options.json`.
-3.  Ensure the new adapter is properly implemented in `brokers/` and follows the `BrokerBase` interface.
-4.  Restart the bot.
