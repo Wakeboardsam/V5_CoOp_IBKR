@@ -11,7 +11,8 @@ from sheets.schema import (
     GRID_TAB_NAME, FILLS_TAB_NAME, HEALTH_TAB_NAME, ERRORS_TAB_NAME,
     COL_STATUS, COL_STRATEGY, COL_SELL_PRICE, COL_BUY_PRICE, COL_SHARES,
     ROW_HEARTBEAT, COL_HEARTBEAT, ROW_CASH, COL_CASH, ROW_ANCHOR_ASK, COL_ANCHOR_ASK,
-    GRID_START_ROW, GRID_END_ROW
+    GRID_START_ROW, GRID_END_ROW,
+    FILLS_HEADERS, HEALTH_HEADERS, ERRORS_HEADERS
 )
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ class SheetInterface:
         )
         self._client = gspread.authorize(self._creds)
         self._sheet = self._client.open_by_key(config.google_sheet_id)
+        self._verified_tabs = set()
 
     async def fetch_grid(self) -> GridState:
         """Reads cols C through H (rows 7 to 100) and returns GridState."""
@@ -121,17 +123,18 @@ class SheetInterface:
         ]
 
         try:
-            await asyncio.to_thread(self._append_row_with_guard, FILLS_TAB_NAME, row)
+            await asyncio.to_thread(self._append_row_with_guard, FILLS_TAB_NAME, row, FILLS_HEADERS)
             return True
         except Exception as e:
             logger.error(f"Failed to log fill: {e}")
             return False
 
     async def log_error(self, error_msg: str) -> bool:
+        logger.error(f"BOT ERROR: {error_msg}")
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         try:
-            await asyncio.to_thread(self._append_row_with_guard, ERRORS_TAB_NAME, [timestamp, error_msg])
+            await asyncio.to_thread(self._append_row_with_guard, ERRORS_TAB_NAME, [timestamp, error_msg], ERRORS_HEADERS)
             return True
         except Exception as e:
             logger.error(f"Failed to log error to sheet: {e}")
@@ -150,19 +153,27 @@ class SheetInterface:
         ]
 
         try:
-            await asyncio.to_thread(self._append_row_with_guard, HEALTH_TAB_NAME, row)
+            await asyncio.to_thread(self._append_row_with_guard, HEALTH_TAB_NAME, row, HEALTH_HEADERS)
             return True
         except Exception as e:
             logger.error(f"Failed to log health status: {e}")
             return False
 
-    def _append_row_with_guard(self, worksheet_name: str, row_data: list):
+    def _append_row_with_guard(self, worksheet_name: str, row_data: list, expected_headers: list = None):
         """Guarded append method to ensure only approved tabs are appended to."""
         if worksheet_name not in [FILLS_TAB_NAME, HEALTH_TAB_NAME, ERRORS_TAB_NAME]:
             raise ValueError(f"Unauthorized append attempt to {worksheet_name}")
 
         try:
             worksheet = self._sheet.worksheet(worksheet_name)
+
+            if worksheet_name not in self._verified_tabs:
+                # Check if empty (no headers)
+                first_cell = worksheet.get_values("A1:A1")
+                if not first_cell and expected_headers:
+                    worksheet.append_row(expected_headers)
+                self._verified_tabs.add(worksheet_name)
+
             worksheet.append_row(row_data)
         except gspread.exceptions.WorksheetNotFound:
             logger.error(f"Worksheet '{worksheet_name}' not found in the spreadsheet.")

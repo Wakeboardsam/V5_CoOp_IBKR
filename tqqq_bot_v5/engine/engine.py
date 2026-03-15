@@ -103,8 +103,9 @@ class GridEngine:
                     "last_fill_time": self.last_fill_time.strftime("%Y-%m-%d %H:%M:%S") if self.last_fill_time else "Never",
                     "status": "Running"
                 }
-                await self.sheet.log_health(health_data)
-                logger.info("Health status logged to Google Sheets")
+                success = await self.sheet.log_health(health_data)
+                if success:
+                    logger.info("Health status logged to Google Sheets")
             except Exception as e:
                 logger.error(f"Failed to log health status: {e}")
 
