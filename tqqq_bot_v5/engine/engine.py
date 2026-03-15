@@ -45,6 +45,7 @@ class GridEngine:
 
         # Start periodic tasks
         health_task = asyncio.create_task(self._log_health_periodic())
+        heartbeat_task = asyncio.create_task(self._heartbeat_periodic())
 
         try:
             while not self._shutdown_event.is_set():
@@ -62,10 +63,11 @@ class GridEngine:
 
             logger.info("Exiting run loop. Starting cleanup...")
         finally:
-            # 1. Cancel health task
+            # 1. Cancel periodic tasks
             health_task.cancel()
+            heartbeat_task.cancel()
             try:
-                await health_task
+                await asyncio.gather(health_task, heartbeat_task, return_exceptions=True)
             except asyncio.CancelledError:
                 pass
 
@@ -106,9 +108,23 @@ class GridEngine:
             except Exception as e:
                 logger.error(f"Failed to log health status: {e}")
 
-            # Wait 5 minutes or until shutdown
+            # Wait for interval or until shutdown
             try:
-                await asyncio.wait_for(self._shutdown_event.wait(), timeout=300)
+                await asyncio.wait_for(self._shutdown_event.wait(), timeout=self.config.health_log_interval_seconds)
+            except asyncio.TimeoutError:
+                pass
+
+    async def _heartbeat_periodic(self):
+        while not self._shutdown_event.is_set():
+            try:
+                await self.sheet.write_heartbeat(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                logger.debug("Heartbeat logged to Google Sheets")
+            except Exception as e:
+                logger.error(f"Failed to log heartbeat: {e}")
+
+            # Wait for interval or until shutdown
+            try:
+                await asyncio.wait_for(self._shutdown_event.wait(), timeout=self.config.heartbeat_interval_seconds)
             except asyncio.TimeoutError:
                 pass
 
@@ -138,9 +154,12 @@ class GridEngine:
         sheet_shares = sum(row.shares for row in self.grid_state.rows.values() if row.has_y)
 
         if broker_shares != sheet_shares:
-            msg = f"CIRCUIT BREAKER: Share discrepancy. Broker: {broker_shares}, Sheet: {sheet_shares}. Halting cycle."
-            logger.critical(msg)
-            await self.sheet.log_error(msg)
+            msg = f"CIRCUIT BREAKER: Share discrepancy. Broker: {broker_shares}, Sheet: {sheet_shares}. Mode: {self.config.share_mismatch_mode}"
+            if self.config.share_mismatch_mode == "halt":
+                logger.critical(msg)
+                await self.sheet.log_error(msg)
+            else:
+                logger.warning(msg)
             return
 
         # 3. Calculate Window

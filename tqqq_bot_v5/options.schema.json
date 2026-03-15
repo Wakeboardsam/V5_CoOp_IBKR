@@ -7,6 +7,10 @@
   "ibkr_username": "str?",
   "ibkr_password": "password?",
   "poll_interval_seconds": "int",
+  "heartbeat_interval_seconds": "int",
+  "health_log_interval_seconds": "int",
+  "anchor_buy_offset": "float",
+  "share_mismatch_mode": "list(halt|warn)",
   "max_spread_pct": "float",
   "google_sheet_id": "str",
   "google_credentials_json": "str"

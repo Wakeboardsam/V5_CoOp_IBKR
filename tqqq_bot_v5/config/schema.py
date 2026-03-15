@@ -11,6 +11,10 @@ class AppConfig(BaseModel):
     ibkr_username: Optional[str] = Field(default=None)
     ibkr_password: Optional[str] = Field(default=None)
     poll_interval_seconds: int = Field(default=60)
+    heartbeat_interval_seconds: int = Field(default=60)
+    health_log_interval_seconds: int = Field(default=300)
+    anchor_buy_offset: float = Field(default=0.0)
+    share_mismatch_mode: str = Field(default="halt")
     max_spread_pct: float = Field(default=0.5)
     google_sheet_id: str
     google_credentials_json: str
