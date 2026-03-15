@@ -68,8 +68,8 @@ async def test_engine_places_sell_and_buy_limits(mock_broker, mock_sheet, config
 
     # Check SELL for row 7
     assert engine.order_manager.has_open_sell(7)
-    # Status should preserve OLD-ID: WORKING_SELL:ORD-123|OWNED:OLD-ID
-    mock_sheet.update_row_status.assert_any_call(7, "WORKING_SELL:ORD-123|OWNED:OLD-ID")
+    # Status should NOT preserve OLD-ID per strict requirements in PR 6
+    mock_sheet.update_row_status.assert_any_call(7, "WORKING_SELL:ORD-123")
 
     # Check BUY for row 8
     assert engine.order_manager.has_open_buy(8)
