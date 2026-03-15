@@ -135,6 +135,7 @@ class GridEngine:
         # 0.1 Diagnostic: fetch balance and price
         try:
             balance = await self.broker.get_wallet_balance()
+            await self.sheet.write_cash_value(balance)
             price = await self.broker.get_price(TICKER)
             self.last_price = price
             if balance == 0 or price == 0:

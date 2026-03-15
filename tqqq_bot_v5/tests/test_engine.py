@@ -56,8 +56,12 @@ async def test_engine_places_sell_and_buy_limits(mock_broker, mock_sheet, config
     # Row 8 is NOT has_y and 8 > 7 -> should place BUY.
 
     mock_broker.get_positions.return_value = {"TQQQ": 10} # Matches Row 7 shares
+    mock_broker.get_wallet_balance.return_value = 50000.0
 
     await engine._tick()
+
+    # Should have updated cash balance
+    mock_sheet.write_cash_value.assert_called_with(50000.0)
 
     # Should have called place_limit_order twice
     assert mock_broker.place_limit_order.call_count == 2
