@@ -115,6 +115,7 @@ class TestSheetInterface(unittest.IsolatedAsyncioTestCase):
 
     async def test_log_fill_success(self):
         mock_worksheet = MagicMock()
+        mock_worksheet.get_values.return_value = [["Header"]] # Not empty
         self.mock_sheet.worksheet.return_value = mock_worksheet
 
         fill_data = {
@@ -136,6 +137,7 @@ class TestSheetInterface(unittest.IsolatedAsyncioTestCase):
 
     async def test_log_error_success(self):
         mock_worksheet = MagicMock()
+        mock_worksheet.get_values.return_value = [["Header"]] # Not empty
         self.mock_sheet.worksheet.return_value = mock_worksheet
 
         result = await self.interface.log_error("Test error")
@@ -144,6 +146,21 @@ class TestSheetInterface(unittest.IsolatedAsyncioTestCase):
         mock_worksheet.append_row.assert_called_once()
         args = mock_worksheet.append_row.call_args[0][0]
         self.assertEqual(args[1], "Test error")
+
+    async def test_log_headers_when_empty(self):
+        mock_worksheet = MagicMock()
+        mock_worksheet.get_values.return_value = [] # Empty
+        self.mock_sheet.worksheet.return_value = mock_worksheet
+
+        # Should trigger header append
+        result = await self.interface.log_error("Test error")
+
+        self.assertTrue(result)
+        # First call should be append_row with headers
+        # Second call should be append_row with data
+        self.assertEqual(mock_worksheet.append_row.call_count, 2)
+        header_args = mock_worksheet.append_row.call_args_list[0][0][0]
+        self.assertEqual(header_args, ["TIMESTAMP", "ERROR_MSG"])
 
     async def test_log_error_missing_worksheet(self):
         self.mock_sheet.worksheet.side_effect = gspread.exceptions.WorksheetNotFound
