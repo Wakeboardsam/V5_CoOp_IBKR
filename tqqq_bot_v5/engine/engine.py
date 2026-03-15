@@ -153,15 +153,21 @@ class GridEngine:
         positions = await self.broker.get_positions()
         broker_shares = positions.get(TICKER, 0)
         sheet_shares = sum(row.shares for row in self.grid_state.rows.values() if row.has_y)
+        mismatch_active = False
 
         if broker_shares != sheet_shares:
             msg = f"CIRCUIT BREAKER: Share discrepancy. Broker: {broker_shares}, Sheet: {sheet_shares}. Mode: {self.config.share_mismatch_mode}"
+            try:
+                await self.sheet.log_error(msg)
+            except Exception as e:
+                logger.error(f"Failed to log discrepancy to sheet: {e}")
+
             if self.config.share_mismatch_mode == "halt":
                 logger.critical(msg)
-                await self.sheet.log_error(msg)
+                return
             else:
                 logger.warning(msg)
-            return
+                mismatch_active = True
 
         # 3. Calculate Window
         distal_y = self.grid_state.distal_y_row
@@ -210,6 +216,10 @@ class GridEngine:
                             if owned_id: new_status += f"|OWNED:{owned_id}"
                             await self.sheet.update_row_status(row.row_index, new_status)
                 elif row.row_index > distal_y:
+                    if mismatch_active:
+                        logger.warning(f"Skipping BUY order for row {row.row_index} due to share mismatch")
+                        continue
+
                     # Expect active BUY order
                     if not self.order_manager.has_open_buy(row.row_index):
                         buy_price = row.buy_price

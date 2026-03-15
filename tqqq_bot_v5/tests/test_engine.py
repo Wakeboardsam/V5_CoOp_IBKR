@@ -116,10 +116,14 @@ async def test_share_mismatch_warn(mock_broker, mock_sheet, config):
 
     await engine._tick()
 
-    # Should NOT have called place_limit_order because it returns early even in warn mode
-    assert mock_broker.place_limit_order.call_count == 0
-    # Should NOT have called log_error (only critical/halt logs to sheet)
-    mock_sheet.log_error.assert_not_called()
+    # Should have called log_error (new in PR 5)
+    mock_sheet.log_error.assert_called()
+
+    # Should HAVE called place_limit_order for SELL (row 7) but NOT for BUY (row 8)
+    # Row 7 is has_y=True in the mock_sheet fixture
+    assert mock_broker.place_limit_order.call_count == 1
+    buy_calls = [call for call in mock_broker.place_limit_order.call_args_list if call.kwargs.get('action') == 'BUY']
+    assert len(buy_calls) == 0
 
 @pytest.mark.asyncio
 async def test_heartbeat_periodic(mock_broker, mock_sheet, config):
