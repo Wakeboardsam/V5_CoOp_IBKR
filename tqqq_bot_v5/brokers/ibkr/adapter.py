@@ -154,13 +154,15 @@ class IBKRAdapter(BrokerBase):
         extended_hours: bool = True,
         on_fill: Optional[Callable] = None
     ) -> OrderResult:
-        from brokers.ibkr.order_builder import get_dynamic_exchange
+        from brokers.ibkr.order_builder import get_dynamic_exchange, get_dynamic_tif
         exchange = get_dynamic_exchange()
+        tif = get_dynamic_tif(exchange)
+        logger.info(f"Session mode: {exchange} / {tif}")
         contract = Stock(ticker, exchange, 'USD')
         await self.ib.qualifyContractsAsync(contract)
 
         order = LimitOrder(action, qty, limit_price)
-        order.tif = 'GTC'
+        order.tif = tif
         order.outsideRth = True
 
         self.ib.placeOrder(contract, order)

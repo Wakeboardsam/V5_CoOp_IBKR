@@ -50,29 +50,34 @@ async def test_place_bracket_order_rth_gtc(mock_ib):
 
         # Actually we should test the builder specifically for outsideRth and tif
         from brokers.ibkr.order_builder import build_bracket_order
-        c, p, t = build_bracket_order(mock_ib, 'TQQQ', 'BUY', 10, 50.0, 55.0)
+        # Mock the dynamic exchange and TIF so we know what they evaluate to
+        with patch('brokers.ibkr.order_builder.get_dynamic_exchange', return_value='OVERNIGHT'):
+            with patch('brokers.ibkr.order_builder.get_dynamic_tif', return_value='OND'):
+                c, p, t = build_bracket_order(mock_ib, 'TQQQ', 'BUY', 10, 50.0, 55.0)
 
         assert p.outsideRth is True
-        assert p.tif == 'GTC'
+        assert p.tif == 'OND'
         assert t.outsideRth is True
-        assert t.tif == 'GTC'
+        assert t.tif == 'OND'
 
-@pytest.mark.parametrize("current_time,expected_exchange", [
-    (datetime.time(10, 0), "SMART"),      # 10 AM ET -> SMART
-    (datetime.time(21, 0), "OVERNIGHT"),  # 9 PM ET -> OVERNIGHT
-    (datetime.time(2, 0), "OVERNIGHT"),   # 2 AM ET -> OVERNIGHT
-    (datetime.time(3, 49), "OVERNIGHT"),  # 3:49 AM ET -> OVERNIGHT
-    (datetime.time(3, 50), "SMART"),      # 3:50 AM ET -> SMART
-    (datetime.time(20, 0), "OVERNIGHT"),  # 8:00 PM ET -> OVERNIGHT
-    (datetime.time(19, 59), "SMART"),     # 7:59 PM ET -> SMART
+@pytest.mark.parametrize("weekday,current_time,expected_exchange", [
+    (0, datetime.time(10, 0), "SMART"),      # Mon 10 AM ET -> SMART
+    (0, datetime.time(21, 0), "OVERNIGHT"),  # Mon 9 PM ET -> OVERNIGHT
+    (1, datetime.time(2, 0), "OVERNIGHT"),   # Tue 2 AM ET -> OVERNIGHT
+    (2, datetime.time(3, 49), "OVERNIGHT"),  # Wed 3:49 AM ET -> OVERNIGHT
+    (3, datetime.time(3, 50), "SMART"),      # Thu 3:50 AM ET -> SMART
+    (4, datetime.time(20, 0), "SMART"),      # Fri 8:00 PM ET -> SMART (weekend skip)
+    (4, datetime.time(20, 1), "SMART"),      # Fri 8:01 PM ET -> SMART (weekend skip)
+    (5, datetime.time(2, 0), "SMART"),       # Sat 2:00 AM ET -> SMART (weekend skip)
+    (6, datetime.time(19, 59), "SMART"),     # Sun 7:59 PM ET -> SMART (weekend skip)
+    (6, datetime.time(20, 1), "OVERNIGHT"),  # Sun 8:01 PM ET -> OVERNIGHT (market open)
 ])
-def test_dynamic_exchange_logic(current_time, expected_exchange):
+def test_dynamic_exchange_logic(weekday, current_time, expected_exchange):
     with patch('brokers.ibkr.order_builder.datetime') as mock_datetime:
-        # Mock now().time() to return current_time
-        # In the implementation: now_et = datetime.datetime.now(tz)
-        #                        current_time = now_et.time()
+        # Mock now().time() to return current_time and now().weekday() to return weekday
         mock_now = MagicMock()
         mock_now.time.return_value = current_time
+        mock_now.weekday.return_value = weekday
         mock_datetime.datetime.now.return_value = mock_now
         mock_datetime.time = datetime.time
 
@@ -233,11 +238,12 @@ async def test_place_limit_order_outside_rth(mock_ib):
     adapter.ib = mock_ib
 
     with patch('brokers.ibkr.order_builder.get_dynamic_exchange', return_value='SMART'):
-        await adapter.place_limit_order('TQQQ', 'BUY', 10, 50.0)
+        with patch('brokers.ibkr.order_builder.get_dynamic_tif', return_value='GTC'):
+            await adapter.place_limit_order('TQQQ', 'BUY', 10, 50.0)
 
-        # Get the order passed to placeOrder
-        args, kwargs = mock_ib.placeOrder.call_args
-        order = args[1]
+            # Get the order passed to placeOrder
+            args, kwargs = mock_ib.placeOrder.call_args
+            order = args[1]
 
-        assert order.outsideRth is True
-        assert order.tif == 'GTC'
+            assert order.outsideRth is True
+            assert order.tif == 'GTC'
