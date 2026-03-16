@@ -2,6 +2,7 @@ import gspread
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Any
 from google.oauth2.service_account import Credentials
@@ -32,6 +33,27 @@ class SheetInterface:
         self._sheet = self._client.open_by_key(config.google_sheet_id)
         self._verified_tabs = set()
 
+    def _parse_numeric(self, value: str) -> float:
+        """
+        Safely parses Google Sheets formatted numbers.
+        Strips accounting formatting, commas, currency symbols, and handles errors like #DIV/0!.
+        """
+        val = str(value).strip()
+        if not val or val.startswith('#') or val in ('-', '$ -'):
+            return 0.0
+
+        # Remove all non-numeric characters EXCEPT period (.) and minus (-)
+        clean_val = re.sub(r'[^\d.-]', '', val)
+
+        # Handle cases where stripping leaves us with nothing valid
+        if not clean_val or clean_val in ('-', '.', '-.'):
+            return 0.0
+
+        try:
+            return float(clean_val)
+        except ValueError:
+            return 0.0
+
     async def fetch_grid(self) -> GridState:
         """Reads cols C through H (rows 7 to 100) and returns GridState."""
         data = await asyncio.to_thread(self._get_grid_range)
@@ -47,16 +69,11 @@ class SheetInterface:
             try:
                 status = str(row_values[0]).strip() if row_values[0] else "IDLE"
                 has_y = str(row_values[1]).strip().upper() == "Y"
-                # row_values[2] is Column E (empty or notes in legacy)
 
-                sell_str = str(row_values[3]).strip()
-                sell_price = float(sell_str) if sell_str else 0.0
-
-                buy_str = str(row_values[4]).strip()
-                buy_price = float(buy_str) if buy_str else 0.0
-
-                shares_str = str(row_values[5]).strip()
-                shares = int(shares_str) if shares_str else 0
+                # Use robust parsing for numeric fields to handle formatted accounting cells
+                sell_price = self._parse_numeric(row_values[3])
+                buy_price = self._parse_numeric(row_values[4])
+                shares = int(self._parse_numeric(row_values[5]))
 
                 rows[row_index] = GridRow(
                     row_index=row_index,
@@ -66,7 +83,7 @@ class SheetInterface:
                     buy_price=buy_price,
                     shares=shares
                 )
-            except (ValueError, TypeError) as e:
+            except Exception as e:
                 logger.debug(f"Skipping malformed row {row_index}: {e}")
                 continue
 
