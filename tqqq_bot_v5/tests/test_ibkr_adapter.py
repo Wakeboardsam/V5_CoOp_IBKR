@@ -247,3 +247,86 @@ async def test_place_limit_order_outside_rth(mock_ib):
 
             assert order.outsideRth is True
             assert order.tif == 'GTC'
+
+@pytest.mark.asyncio
+async def test_get_price_contract_routing(mock_ib):
+    adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
+    adapter.ib = mock_ib
+
+    # Mock ticker data
+    mock_ticker = MagicMock()
+    mock_ticker.last = 50.0
+    mock_ib.reqMktData.return_value = mock_ticker
+
+    # Test SMART
+    with patch('brokers.ibkr.order_builder.get_dynamic_exchange', return_value='SMART'):
+        await adapter.get_price('TQQQ')
+        contract_arg = mock_ib.reqMktData.call_args[0][0]
+        assert contract_arg.symbol == 'TQQQ'
+        assert contract_arg.exchange == 'SMART'
+        assert contract_arg.primaryExchange == 'NASDAQ'
+        assert contract_arg.currency == 'USD'
+        assert contract_arg.secType == 'STK'
+
+    # Test OVERNIGHT
+    with patch('brokers.ibkr.order_builder.get_dynamic_exchange', return_value='OVERNIGHT'):
+        await adapter.get_price('TQQQ')
+        contract_arg = mock_ib.reqMktData.call_args[0][0]
+        assert contract_arg.symbol == 'TQQQ'
+        assert contract_arg.exchange == 'OVERNIGHT'
+        assert contract_arg.primaryExchange == 'NASDAQ'
+        assert contract_arg.currency == 'USD'
+        assert contract_arg.secType == 'STK'
+
+@pytest.mark.asyncio
+async def test_get_bid_ask_contract_routing(mock_ib):
+    adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
+    adapter.ib = mock_ib
+
+    # Mock ticker data
+    mock_ticker = MagicMock()
+    mock_ticker.bid = 49.9
+    mock_ticker.ask = 50.1
+    mock_ib.reqMktData.return_value = mock_ticker
+
+    # Test SMART
+    with patch('brokers.ibkr.order_builder.get_dynamic_exchange', return_value='SMART'):
+        await adapter.get_bid_ask('TQQQ')
+        contract_arg = mock_ib.reqMktData.call_args[0][0]
+        assert contract_arg.symbol == 'TQQQ'
+        assert contract_arg.exchange == 'SMART'
+        assert contract_arg.primaryExchange == 'NASDAQ'
+
+    # Test OVERNIGHT
+    with patch('brokers.ibkr.order_builder.get_dynamic_exchange', return_value='OVERNIGHT'):
+        await adapter.get_bid_ask('TQQQ')
+        contract_arg = mock_ib.reqMktData.call_args[0][0]
+        assert contract_arg.symbol == 'TQQQ'
+        assert contract_arg.exchange == 'OVERNIGHT'
+        assert contract_arg.primaryExchange == 'NASDAQ'
+
+@pytest.mark.asyncio
+async def test_place_limit_order_contract_routing(mock_ib):
+    adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
+    adapter.ib = mock_ib
+
+    with patch('brokers.ibkr.order_builder.get_dynamic_exchange', return_value='OVERNIGHT'):
+        with patch('brokers.ibkr.order_builder.get_dynamic_tif', return_value='OND'):
+            await adapter.place_limit_order('TQQQ', 'BUY', 10, 50.0)
+
+            # Check the contract passed to placeOrder
+            contract_arg, order_arg = mock_ib.placeOrder.call_args[0]
+            assert contract_arg.symbol == 'TQQQ'
+            assert contract_arg.exchange == 'OVERNIGHT'
+            assert contract_arg.primaryExchange == 'NASDAQ'
+            assert contract_arg.secType == 'STK'
+
+def test_build_bracket_order_contract_routing(mock_ib):
+    from brokers.ibkr.order_builder import build_bracket_order
+
+    with patch('brokers.ibkr.order_builder.get_dynamic_exchange', return_value='OVERNIGHT'):
+        with patch('brokers.ibkr.order_builder.get_dynamic_tif', return_value='OND'):
+            c, p, t = build_bracket_order(mock_ib, 'TQQQ', 'BUY', 10, 50.0, 55.0)
+            assert c.symbol == 'TQQQ'
+            assert c.exchange == 'OVERNIGHT'
+            assert c.primaryExchange == 'NASDAQ'
