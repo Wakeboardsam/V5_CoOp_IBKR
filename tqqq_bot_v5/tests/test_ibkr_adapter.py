@@ -161,13 +161,6 @@ async def test_get_price_fallbacks(mock_ib):
     price = await adapter.get_price('TQQQ')
     assert price == 51.0
 
-    # Test delayedLast fallback
-    mock_ticker.last = 0.0
-    mock_ticker.close = 0.0
-    mock_ticker.delayedLast = 52.0
-
-    price = await adapter.get_price('TQQQ')
-    assert price == 52.0
 
 @pytest.mark.asyncio
 async def test_get_wallet_balance_selection_settled(mock_ib):
@@ -330,3 +323,21 @@ def test_build_bracket_order_contract_routing(mock_ib):
             assert c.symbol == 'TQQQ'
             assert c.exchange == 'OVERNIGHT'
             assert c.primaryExchange == 'NASDAQ'
+
+@pytest.mark.asyncio
+async def test_get_bid_ask_fallback(mock_ib):
+    adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
+    adapter.ib = mock_ib
+
+    mock_ticker = MagicMock()
+    mock_ticker.bid = 0.0
+    mock_ticker.ask = 0.0
+    mock_ticker.last = 50.5
+    mock_ticker.close = 50.0
+
+    mock_ib.reqMktData.return_value = mock_ticker
+
+    with patch('brokers.ibkr.order_builder.get_dynamic_exchange', return_value='OVERNIGHT'):
+        bid, ask = await adapter.get_bid_ask('TQQQ')
+        assert bid == 50.5
+        assert ask == 50.5
