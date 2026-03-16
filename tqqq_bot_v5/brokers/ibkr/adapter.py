@@ -63,8 +63,9 @@ class IBKRAdapter(BrokerBase):
             raise ConnectionError(f"Watchdog failed to reconnect after {max_attempts} attempts.")
 
     async def get_price(self, ticker: str) -> float:
-        # TQQQ contract is always Stock('TQQQ', 'SMART', 'USD') per instructions
-        contract = Stock(ticker, 'SMART', 'USD')
+        from brokers.ibkr.order_builder import get_dynamic_exchange
+        exchange = get_dynamic_exchange()
+        contract = Stock(ticker, exchange, 'USD', primaryExchange='NASDAQ')
         await self.ib.qualifyContractsAsync(contract)
 
         try:
@@ -92,7 +93,9 @@ class IBKRAdapter(BrokerBase):
             self.ib.cancelMktData(contract)
 
     async def get_bid_ask(self, ticker: str) -> tuple[float, float]:
-        contract = Stock(ticker, 'SMART', 'USD')
+        from brokers.ibkr.order_builder import get_dynamic_exchange
+        exchange = get_dynamic_exchange()
+        contract = Stock(ticker, exchange, 'USD', primaryExchange='NASDAQ')
         await self.ib.qualifyContractsAsync(contract)
         ticker_data = self.ib.reqMktData(contract, '', False, False)
 
@@ -158,7 +161,7 @@ class IBKRAdapter(BrokerBase):
         exchange = get_dynamic_exchange()
         tif = get_dynamic_tif(exchange)
         logger.info(f"Session mode: {exchange} / {tif}")
-        contract = Stock(ticker, exchange, 'USD')
+        contract = Stock(ticker, exchange, 'USD', primaryExchange='NASDAQ')
         await self.ib.qualifyContractsAsync(contract)
 
         order = LimitOrder(action, qty, limit_price)

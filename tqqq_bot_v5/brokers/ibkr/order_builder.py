@@ -50,7 +50,7 @@ def build_bracket_order(ib: IB, ticker: str, action: str, qty: int, limit_price:
     logger = logging.getLogger(__name__)
     logger.info(f"Session mode: {exchange} / {tif}")
 
-    contract = Stock(ticker, exchange, 'USD')
+    contract = Stock(ticker, exchange, 'USD', primaryExchange='NASDAQ')
 
     # ib.bracketOrder returns a list of Order objects: [parent, takeProfit, stopLoss]
     # We only need parent and takeProfit for this requirement (no stopLoss mentioned,
