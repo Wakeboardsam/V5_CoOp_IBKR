@@ -7,6 +7,7 @@ from engine.engine import GridEngine
 from engine.grid_state import GridState, GridRow
 from brokers.base import OrderResult
 from config.schema import AppConfig
+import zoneinfo
 
 @pytest.fixture
 def mock_broker():
@@ -185,6 +186,65 @@ async def test_no_anchor_write_if_owned(mock_broker, mock_sheet, config):
 
     # Should NOT write anchor ask to G7
     mock_sheet.write_anchor_ask.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_engine_boundary_regeneration(mock_broker, mock_sheet, config):
+    engine = GridEngine(mock_broker, mock_sheet, config)
+
+    # 1. Start session normally
+    tz = zoneinfo.ZoneInfo("America/New_York")
+
+    # Track a dummy order
+    engine.order_manager.track(10, OrderResult(order_id="TEST-1", status="submitted"), "BUY")
+    mock_broker.cancel_order = AsyncMock(return_value=True)
+
+    # Mock time to cross 4:00 PM ET on a Wednesday
+    # Wednesday is weekday 2
+    wed_16_01 = datetime(2023, 10, 11, 16, 1, 0, tzinfo=tz)
+
+    with patch('engine.engine.datetime') as mock_dt:
+        mock_dt.now.return_value = wed_16_01
+        mock_dt.combine = datetime.combine
+        await engine._check_daily_grid_regeneration()
+
+    # Verify cancel_all_orders was triggered (which calls broker.cancel_order)
+    mock_broker.cancel_order.assert_called_with("TEST-1")
+    # Verify order manager was reset
+    assert not engine.order_manager.is_tracked("TEST-1")
+
+    # 2. Track another order and cross 8:00 PM ET
+    engine.order_manager.track(11, OrderResult(order_id="TEST-2", status="submitted"), "SELL")
+    mock_broker.cancel_order.reset_mock()
+
+    wed_20_01 = datetime(2023, 10, 11, 20, 1, 0, tzinfo=tz)
+
+    with patch('engine.engine.datetime') as mock_dt:
+        mock_dt.now.return_value = wed_20_01
+        mock_dt.combine = datetime.combine
+        await engine._check_daily_grid_regeneration()
+
+    mock_broker.cancel_order.assert_called_with("TEST-2")
+    assert not engine.order_manager.is_tracked("TEST-2")
+    assert engine._is_weekend_gap is False
+
+    # 3. Test Weekend Skip: Friday 4:01 PM ET
+    # Friday is weekday 4
+    engine.order_manager.track(12, OrderResult(order_id="TEST-3", status="submitted"), "BUY")
+    mock_broker.cancel_order.reset_mock()
+
+    fri_16_01 = datetime(2023, 10, 13, 16, 1, 0, tzinfo=tz)
+
+    with patch('engine.engine.datetime') as mock_dt:
+        mock_dt.now.return_value = fri_16_01
+        mock_dt.combine = datetime.combine
+        await engine._check_daily_grid_regeneration()
+
+    # It should still cancel and reset the previous day's orders,
+    # but it should also set _is_weekend_gap = True
+    mock_broker.cancel_order.assert_called_with("TEST-3")
+    assert not engine.order_manager.is_tracked("TEST-3")
+    assert engine._is_weekend_gap is True
+
 
 @pytest.mark.asyncio
 async def test_no_anchor_write_if_already_working(mock_broker, mock_sheet, config):

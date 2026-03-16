@@ -60,22 +60,24 @@ async def test_place_bracket_order_rth_gtc(mock_ib):
         assert t.outsideRth is True
         assert t.tif == 'OND'
 
-@pytest.mark.parametrize("current_time,expected_exchange", [
-    (datetime.time(10, 0), "SMART"),      # 10 AM ET -> SMART
-    (datetime.time(21, 0), "OVERNIGHT"),  # 9 PM ET -> OVERNIGHT
-    (datetime.time(2, 0), "OVERNIGHT"),   # 2 AM ET -> OVERNIGHT
-    (datetime.time(3, 49), "OVERNIGHT"),  # 3:49 AM ET -> OVERNIGHT
-    (datetime.time(3, 50), "SMART"),      # 3:50 AM ET -> SMART
-    (datetime.time(20, 0), "OVERNIGHT"),  # 8:00 PM ET -> OVERNIGHT
-    (datetime.time(19, 59), "SMART"),     # 7:59 PM ET -> SMART
+@pytest.mark.parametrize("weekday,current_time,expected_exchange", [
+    (0, datetime.time(10, 0), "SMART"),      # Mon 10 AM ET -> SMART
+    (0, datetime.time(21, 0), "OVERNIGHT"),  # Mon 9 PM ET -> OVERNIGHT
+    (1, datetime.time(2, 0), "OVERNIGHT"),   # Tue 2 AM ET -> OVERNIGHT
+    (2, datetime.time(3, 49), "OVERNIGHT"),  # Wed 3:49 AM ET -> OVERNIGHT
+    (3, datetime.time(3, 50), "SMART"),      # Thu 3:50 AM ET -> SMART
+    (4, datetime.time(20, 0), "SMART"),      # Fri 8:00 PM ET -> SMART (weekend skip)
+    (4, datetime.time(20, 1), "SMART"),      # Fri 8:01 PM ET -> SMART (weekend skip)
+    (5, datetime.time(2, 0), "SMART"),       # Sat 2:00 AM ET -> SMART (weekend skip)
+    (6, datetime.time(19, 59), "SMART"),     # Sun 7:59 PM ET -> SMART (weekend skip)
+    (6, datetime.time(20, 1), "OVERNIGHT"),  # Sun 8:01 PM ET -> OVERNIGHT (market open)
 ])
-def test_dynamic_exchange_logic(current_time, expected_exchange):
+def test_dynamic_exchange_logic(weekday, current_time, expected_exchange):
     with patch('brokers.ibkr.order_builder.datetime') as mock_datetime:
-        # Mock now().time() to return current_time
-        # In the implementation: now_et = datetime.datetime.now(tz)
-        #                        current_time = now_et.time()
+        # Mock now().time() to return current_time and now().weekday() to return weekday
         mock_now = MagicMock()
         mock_now.time.return_value = current_time
+        mock_now.weekday.return_value = weekday
         mock_datetime.datetime.now.return_value = mock_now
         mock_datetime.time = datetime.time
 

@@ -45,6 +45,11 @@ def build_bracket_order(ib: IB, ticker: str, action: str, qty: int, limit_price:
     """
     exchange = get_dynamic_exchange()
     tif = get_dynamic_tif(exchange)
+
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Session mode: {exchange} / {tif}")
+
     contract = Stock(ticker, exchange, 'USD')
 
     # ib.bracketOrder returns a list of Order objects: [parent, takeProfit, stopLoss]
