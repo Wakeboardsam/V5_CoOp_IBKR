@@ -40,16 +40,23 @@ class SheetInterface:
         # Start row in sheet is 7. Data starts at row index 0.
         for i, row_values in enumerate(data):
             row_index = 7 + i
-            if len(row_values) < 6: # C, D, E, F, G, H
-                continue
+
+            # Pad row_values to length 6 if gspread truncates trailing empty cells
+            row_values = row_values + [''] * max(0, 6 - len(row_values))
 
             try:
-                status = str(row_values[0]).strip()
+                status = str(row_values[0]).strip() if row_values[0] else "IDLE"
                 has_y = str(row_values[1]).strip().upper() == "Y"
                 # row_values[2] is Column E (empty or notes in legacy)
-                sell_price = float(row_values[3]) if row_values[3] else 0.0
-                buy_price = float(row_values[4]) if row_values[4] else 0.0
-                shares = int(row_values[5]) if row_values[5] else 0
+
+                sell_str = str(row_values[3]).strip()
+                sell_price = float(sell_str) if sell_str else 0.0
+
+                buy_str = str(row_values[4]).strip()
+                buy_price = float(buy_str) if buy_str else 0.0
+
+                shares_str = str(row_values[5]).strip()
+                shares = int(shares_str) if shares_str else 0
 
                 rows[row_index] = GridRow(
                     row_index=row_index,
