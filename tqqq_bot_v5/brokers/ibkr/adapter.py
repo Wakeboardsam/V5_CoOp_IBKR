@@ -80,8 +80,6 @@ class IBKRAdapter(BrokerBase):
                 return ticker_data.last
             if ticker_data.close > 0:
                 return ticker_data.close
-            if ticker_data.delayedLast > 0:
-                return ticker_data.delayedLast
 
             logger.error("API call returned empty — possible Gateway auth or subscription issue")
             raise RuntimeError(f"Could not get price for {ticker}")
@@ -105,7 +103,23 @@ class IBKRAdapter(BrokerBase):
                     return ticker_data.bid, ticker_data.ask
                 await asyncio.sleep(0.1)
 
+            # Fallback to last/close prices if bid/ask is unavailable
+            fallback_price = None
+            if ticker_data.last > 0:
+                fallback_price = ticker_data.last
+            elif ticker_data.close > 0:
+                fallback_price = ticker_data.close
+
+            if fallback_price is not None:
+                logger.warning(f"Bid/Ask unavailable for {ticker}, falling back to last/close price: {fallback_price}")
+                return fallback_price, fallback_price
+
+            logger.error("API call returned empty — possible Gateway auth or subscription issue")
             raise RuntimeError(f"Could not get bid/ask for {ticker}")
+        except Exception as e:
+            if not isinstance(e, RuntimeError):
+                logger.error(f"Error fetching bid/ask: {e}")
+            raise
         finally:
             self.ib.cancelMktData(contract)
 
