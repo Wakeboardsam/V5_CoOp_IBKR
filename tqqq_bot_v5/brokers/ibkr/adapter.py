@@ -16,11 +16,17 @@ class IBKRAdapter(BrokerBase):
         self.client_id = client_id
         self.paper = paper
         self.ib = IB()
-        self._on_fill_callbacks: dict[str, Callable] = {}
+        self._on_update_callbacks: dict[str, Callable] = {}
         self._selected_cash_tag: Optional[str] = None
+        self._last_error: dict[int, tuple[int, str]] = {}  # reqId -> (errorCode, errorString)
 
         # Subscribe to order status events
         self.ib.orderStatusEvent += self._on_order_status
+        self.ib.errorEvent += self._on_error
+
+    def _on_error(self, reqId, errorCode, errorString, contract):
+        logger.error(f"IBKR Error {errorCode}: {errorString}")
+        self._last_error[reqId] = (errorCode, errorString)
 
     async def connect(self) -> bool:
         connected = await async_connect(self.ib, self.host, self.port, self.client_id)
@@ -169,7 +175,7 @@ class IBKRAdapter(BrokerBase):
         self, ticker: str, action: str,
         qty: int, limit_price: float,
         extended_hours: bool = True,
-        on_fill: Optional[Callable] = None
+        on_update: Optional[Callable] = None
     ) -> OrderResult:
         from brokers.ibkr.order_builder import get_dynamic_exchange, get_dynamic_tif
         exchange = get_dynamic_exchange()
@@ -182,33 +188,67 @@ class IBKRAdapter(BrokerBase):
         order.tif = tif
         order.outsideRth = True
 
-        self.ib.placeOrder(contract, order)
+        trade = self.ib.placeOrder(contract, order)
+        order_id = str(order.orderId)
 
-        if on_fill:
-            self._on_fill_callbacks[str(order.orderId)] = on_fill
+        if on_update:
+            self._on_update_callbacks[order_id] = on_update
 
-        return OrderResult(
-            order_id=str(order.orderId),
-            status='submitted'
-        )
+        # Wait for status to be 'Submitted', 'PreSubmitted', or terminal
+        while not trade.isDone() and trade.orderStatus.status not in ('Submitted', 'PreSubmitted'):
+            await asyncio.sleep(0.1)
+            if order.orderId in self._last_error:
+                err_code, err_msg = self._last_error[order.orderId]
+                # If it's a known terminal error for the order
+                if err_code == 10329:
+                    return OrderResult(
+                        order_id=order_id,
+                        status='error',
+                        error_code=err_code,
+                        error_msg=err_msg
+                    )
 
-    def subscribe_to_fill(self, order_id: str, callback: Callable):
-        self._on_fill_callbacks[order_id] = callback
+        status = trade.orderStatus.status
+        if status in ('Submitted', 'PreSubmitted'):
+            return OrderResult(order_id=order_id, status='submitted')
+        elif status == 'Filled':
+            return OrderResult(
+                order_id=order_id,
+                status='filled',
+                filled_price=trade.orderStatus.avgFillPrice,
+                filled_qty=trade.orderStatus.filled
+            )
+        else:
+            err_code = None
+            err_msg = trade.orderStatus.whyHeld or f"Order failed with status: {status}"
+            if order.orderId in self._last_error:
+                err_code, err_msg = self._last_error[order.orderId]
+
+            return OrderResult(
+                order_id=order_id,
+                status='error',
+                error_code=err_code,
+                error_msg=err_msg,
+                reason=status
+            )
+
+    def subscribe_to_updates(self, order_id: str, on_update: Callable):
+        self._on_update_callbacks[order_id] = on_update
 
     async def place_bracket_order(
         self, ticker: str, action: str,
         qty: int, limit_price: float, profit_price: float,
         extended_hours: bool = True,
-        on_fill: Optional[Callable] = None
+        on_update: Optional[Callable] = None
     ) -> OrderResult:
         contract, parent, take_profit = build_bracket_order(
             self.ib, ticker, action, qty, limit_price, profit_price
         )
 
         # Save callback for fills by orderId (both parent and TP)
-        if on_fill:
-            self._on_fill_callbacks[str(parent.orderId)] = on_fill
-            self._on_fill_callbacks[str(take_profit.orderId)] = on_fill
+        if on_update:
+            self._on_update_callbacks[str(parent.orderId)] = on_update
+            self._on_update_callbacks[str(take_profit.orderId)] = on_update
 
         # Ensure contract is qualified
         await self.ib.qualifyContractsAsync(contract)
@@ -253,29 +293,48 @@ class IBKRAdapter(BrokerBase):
 
     def _on_order_status(self, trade: Trade):
         status = trade.orderStatus.status
-        if status == 'Filled':
-            order_id = str(trade.order.orderId)
-            callback = self._on_fill_callbacks.get(order_id)
-            if callback:
-                # Basic fill details
-                fill_details = {
-                    'order_id': order_id,
-                    'symbol': trade.contract.symbol,
-                    'qty': trade.orderStatus.filled,
-                    'price': trade.orderStatus.avgFillPrice
-                }
-                callback(fill_details)
-                logger.info(f"Fill callback called for order {order_id}")
-                # Optional: remove callback after fill if it's a one-time thing
-                # del self._on_fill_callbacks[order_id]
+        order_id = str(trade.order.orderId)
+        callback = self._on_update_callbacks.get(order_id)
+
+        unified_status = None
+        if status in ('Submitted', 'PreSubmitted'):
+            unified_status = 'submitted'
+        elif status == 'Filled':
+            unified_status = 'filled'
         elif status in ('Cancelled', 'Inactive', 'Rejected'):
+            unified_status = 'cancelled' if status == 'Cancelled' else 'error'
+
+            # LOUD ALERT for terminal failures
             reason = trade.orderStatus.whyHeld or "No reason provided"
+            err_code = None
+            if trade.order.orderId in self._last_error:
+                err_code, err_msg = self._last_error[trade.order.orderId]
+                reason = f"{err_msg} (Code: {err_code})"
+
             logger.warning(
                 f"\n"
                 f"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
-                f"LOUD ALERT: ORDER {trade.order.orderId} {status.upper()}!\n"
+                f"LOUD ALERT: ORDER {order_id} {status.upper()}!\n"
                 f"Ticker: {trade.contract.symbol}\n"
                 f"Action: {trade.order.action}\n"
                 f"Reason: {reason}\n"
                 f"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
             )
+
+        if callback and unified_status:
+            err_code = None
+            err_msg = trade.orderStatus.whyHeld
+            if trade.order.orderId in self._last_error:
+                err_code, err_msg = self._last_error[trade.order.orderId]
+
+            result = OrderResult(
+                order_id=order_id,
+                status=unified_status,
+                filled_price=trade.orderStatus.avgFillPrice if status == 'Filled' else None,
+                filled_qty=trade.orderStatus.filled if status == 'Filled' else None,
+                error_msg=err_msg,
+                error_code=err_code,
+                reason=status
+            )
+            callback(result)
+            logger.info(f"Update callback called for order {order_id} status {status}")

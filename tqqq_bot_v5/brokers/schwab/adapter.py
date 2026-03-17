@@ -28,7 +28,7 @@ class SchwabAdapter(BrokerBase):
         self, ticker: str, action: str,
         qty: int, limit_price: float, profit_price: float,
         extended_hours: bool = True,
-        on_fill: Optional[Callable] = None
+        on_update: Optional[Callable] = None
     ) -> OrderResult:
         raise NotImplementedError
 
@@ -42,11 +42,11 @@ class SchwabAdapter(BrokerBase):
         self, ticker: str, action: str,
         qty: int, limit_price: float,
         extended_hours: bool = True,
-        on_fill: Optional[Callable] = None
+        on_update: Optional[Callable] = None
     ) -> OrderResult:
         raise NotImplementedError
 
-    def subscribe_to_fill(self, order_id: str, callback: Callable):
+    def subscribe_to_updates(self, order_id: str, on_update: Callable):
         raise NotImplementedError
 
     async def get_positions(self) -> dict[str, int]:

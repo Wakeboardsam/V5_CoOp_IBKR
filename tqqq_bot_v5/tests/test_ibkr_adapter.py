@@ -84,7 +84,7 @@ def test_dynamic_exchange_logic(weekday, current_time, expected_exchange):
         assert get_dynamic_exchange() == expected_exchange
 
 @pytest.mark.asyncio
-async def test_on_fill_callback(mock_ib):
+async def test_handle_order_update_callback(mock_ib):
     adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
     adapter.ib = mock_ib
 
@@ -92,8 +92,8 @@ async def test_on_fill_callback(mock_ib):
     mock_callback2 = MagicMock()
 
     # Place two orders
-    adapter._on_fill_callbacks['100'] = mock_callback1
-    adapter._on_fill_callbacks['200'] = mock_callback2
+    adapter._on_update_callbacks['100'] = mock_callback1
+    adapter._on_update_callbacks['200'] = mock_callback2
 
     # Create mock Trades
     trade1 = MagicMock()
@@ -102,6 +102,7 @@ async def test_on_fill_callback(mock_ib):
     trade1.orderStatus.status = 'Filled'
     trade1.orderStatus.filled = 10
     trade1.orderStatus.avgFillPrice = 50.5
+    trade1.orderStatus.whyHeld = None
 
     trade2 = MagicMock()
     trade2.order.orderId = 200
@@ -109,23 +110,27 @@ async def test_on_fill_callback(mock_ib):
     trade2.orderStatus.status = 'Filled'
     trade2.orderStatus.filled = 5
     trade2.orderStatus.avgFillPrice = 51.0
+    trade2.orderStatus.whyHeld = None
 
     # Manually trigger callbacks
     adapter._on_order_status(trade1)
     adapter._on_order_status(trade2)
 
-    mock_callback1.assert_called_once_with({
-        'order_id': '100',
-        'symbol': 'TQQQ',
-        'qty': 10,
-        'price': 50.5
-    })
-    mock_callback2.assert_called_once_with({
-        'order_id': '200',
-        'symbol': 'TQQQ',
-        'qty': 5,
-        'price': 51.0
-    })
+    from brokers.base import OrderResult
+    mock_callback1.assert_called_once_with(OrderResult(
+        order_id='100',
+        status='filled',
+        filled_qty=10,
+        filled_price=50.5,
+        reason='Filled'
+    ))
+    mock_callback2.assert_called_once_with(OrderResult(
+        order_id='200',
+        status='filled',
+        filled_qty=5,
+        filled_price=51.0,
+        reason='Filled'
+    ))
 
 @pytest.mark.asyncio
 async def test_market_data_cancellation(mock_ib):

@@ -10,6 +10,8 @@ class OrderResult:
     filled_price: Optional[float] = None
     filled_qty:   Optional[int]   = None
     error_msg:    Optional[str]   = None
+    error_code:   Optional[int]   = None
+    reason:       Optional[str]   = None
 
 
 class BrokerBase(ABC):
@@ -40,7 +42,7 @@ class BrokerBase(ABC):
         self, ticker: str, action: str,  # 'BUY' | 'SELL'
         qty: int, limit_price: float, profit_price: float,
         extended_hours: bool = True,
-        on_fill: Optional[Callable] = None
+        on_update: Optional[Callable] = None
     ) -> OrderResult: ...
 
     @abstractmethod
@@ -48,11 +50,11 @@ class BrokerBase(ABC):
         self, ticker: str, action: str,
         qty: int, limit_price: float,
         extended_hours: bool = True,
-        on_fill: Optional[Callable] = None
+        on_update: Optional[Callable] = None
     ) -> OrderResult: ...
 
     @abstractmethod
-    def subscribe_to_fill(self, order_id: str, callback: Callable): ...
+    def subscribe_to_updates(self, order_id: str, on_update: Callable): ...
 
     @abstractmethod
     async def cancel_order(self, order_id: str) -> bool: ...

@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Set, Tuple, List, Optional, Any
+from typing import Dict, Set, Tuple, List, Optional, Any, Callable
 from brokers.base import OrderResult
 
 logger = logging.getLogger(__name__)
@@ -13,10 +13,12 @@ class OrderManager:
         # Mapping of row_index to action ('BUY' or 'SELL')
         self._row_actions: Dict[Any, str] = {}
 
-    def track(self, row_index: Any, order_result: OrderResult, action: str = None):
+    def track(self, row_index: Any, order_result: OrderResult, action: str = None,
+              broker: Optional[Any] = None, on_update: Optional[Callable] = None):
         """
         Track one or more orders for a grid row.
         order_result.order_id can be a single ID or multiple IDs separated by '|'.
+        If broker and on_update are provided, subscribes to updates for each order.
         """
         if action:
             self._row_actions[row_index] = action.upper()
@@ -29,6 +31,8 @@ class OrderManager:
         for oid in order_ids:
             self._row_to_orders[row_index].add(oid)
             self._order_map[oid] = (row_index, self._row_actions[row_index])
+            if broker and on_update:
+                broker.subscribe_to_updates(oid, on_update)
 
         logger.info(f"Tracking {self._row_actions[row_index]} row {row_index} with order(s): {order_ids}")
 

@@ -21,7 +21,7 @@ def mock_broker():
     broker.place_limit_order = AsyncMock(return_value=OrderResult(order_id="ORD-123", status="submitted"))
     broker.get_open_orders = AsyncMock(return_value=[])
     broker.get_positions = AsyncMock(return_value={"TQQQ": 10})
-    broker.subscribe_to_fill = MagicMock()
+    broker.subscribe_to_updates = MagicMock()
     return broker
 
 @pytest.fixture
@@ -165,7 +165,7 @@ async def test_anchor_acquisition(mock_broker, mock_sheet, config):
 
     # Should place buy order at ask + offset (100.0 + 0.05 = 100.05)
     mock_broker.place_limit_order.assert_any_call(
-        ticker="TQQQ", action="BUY", qty=10, limit_price=100.05, on_fill=engine._on_fill
+        ticker="TQQQ", action="BUY", qty=10, limit_price=100.05, on_update=engine._handle_order_update
     )
 
 @pytest.mark.asyncio

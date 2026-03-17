@@ -18,7 +18,7 @@ def mock_broker():
     broker.place_limit_order = AsyncMock(return_value=OrderResult(order_id="ORD-123", status="submitted"))
     broker.get_open_orders = AsyncMock(return_value=[])
     broker.get_positions = AsyncMock(return_value={"TQQQ": 0})
-    broker.subscribe_to_fill = MagicMock()
+    broker.subscribe_to_updates = MagicMock()
     broker.cancel_order = AsyncMock(return_value=True)
     return broker
 
@@ -63,10 +63,10 @@ async def test_transition_working_buy_to_owned(mock_broker, mock_sheet, config):
     engine.order_manager.track(10, OrderResult(order_id="BUY-123", status="submitted"), 'BUY')
 
     # Simulate fill
-    fill_details = {'order_id': 'BUY-123', 'price': 105.0, 'qty': 10}
-    engine._on_fill(fill_details)
+    result = OrderResult(order_id='BUY-123', status='filled', filled_price=105.0, filled_qty=10)
+    engine._handle_order_update(result)
 
-    # Wait for the async task in _on_fill
+    # Wait for the async task in _handle_order_update
     await asyncio.sleep(0.1)
 
     mock_sheet.update_row_status.assert_called_with(10, "OWNED:BUY-123")
@@ -94,10 +94,10 @@ async def test_transition_working_sell_to_idle(mock_broker, mock_sheet, config):
     engine.order_manager.track(10, OrderResult(order_id="SELL-456", status="submitted"), 'SELL')
 
     # Simulate fill
-    fill_details = {'order_id': 'SELL-456', 'price': 110.0, 'qty': 10}
-    engine._on_fill(fill_details)
+    result = OrderResult(order_id='SELL-456', status='filled', filled_price=110.0, filled_qty=10)
+    engine._handle_order_update(result)
 
-    # Wait for the async task in _on_fill
+    # Wait for the async task in _handle_order_update
     await asyncio.sleep(0.1)
 
     mock_sheet.update_row_status.assert_called_with(10, "IDLE")
