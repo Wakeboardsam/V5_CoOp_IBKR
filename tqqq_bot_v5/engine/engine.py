@@ -47,6 +47,9 @@ class GridEngine:
 
         await self.broker.connect()
 
+        # Wait for a valid price before starting anything else
+        await self._wait_for_initial_price()
+
         # Start periodic tasks
         health_task = asyncio.create_task(self._log_health_periodic())
         heartbeat_task = asyncio.create_task(self._heartbeat_periodic())
@@ -85,6 +88,37 @@ class GridEngine:
     def _handle_shutdown_signal(self):
         logger.info("Shutdown signal received.")
         self._shutdown_event.set()
+
+    async def _wait_for_initial_price(self):
+        """
+        Explicitly poll for price and wait until a non-zero value is confirmed.
+        Retry every 10 seconds for up to 240 seconds.
+        """
+        logger.info(f"Waiting for initial confirmed price for {TICKER}...")
+        start_time = asyncio.get_event_loop().time()
+        timeout = 240
+        interval = 10
+
+        while not self._shutdown_event.is_set():
+            try:
+                price = await self.broker.get_price(TICKER)
+                if price > 0:
+                    self.last_price = price
+                    logger.info(f"Initial price confirmed: {price}")
+                    return
+            except Exception as e:
+                logger.warning(f"Error fetching initial price: {e}")
+
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if elapsed >= timeout:
+                logger.error(f"Timed out waiting for initial price after {timeout}s")
+                break
+
+            logger.info(f"Price not yet available, retrying in {interval}s... (Elapsed: {int(elapsed)}s)")
+            try:
+                await asyncio.wait_for(self._shutdown_event.wait(), timeout=interval)
+            except asyncio.TimeoutError:
+                pass
 
     async def _cancel_all_orders(self):
         tracked_ids = self.order_manager.get_tracked_order_ids()
