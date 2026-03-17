@@ -28,6 +28,7 @@ class GridEngine:
         self._last_reconciliation = datetime.min
         self.last_price = 0.0
         self.last_fill_time: Optional[datetime] = None
+        self.last_broker_shares = 0
         self._shutdown_event = asyncio.Event()
         tz = zoneinfo.ZoneInfo("America/New_York")
         self._last_grid_regeneration = datetime.min.replace(tzinfo=tz)
@@ -49,6 +50,11 @@ class GridEngine:
 
         # Wait for a valid price before starting anything else
         await self._wait_for_initial_price()
+
+        if self._shutdown_event.is_set():
+            logger.critical("Engine shutdown initiated during startup. Aborting run.")
+            await self.broker.disconnect()
+            return
 
         # Start periodic tasks
         health_task = asyncio.create_task(self._log_health_periodic())
@@ -92,12 +98,12 @@ class GridEngine:
     async def _wait_for_initial_price(self):
         """
         Explicitly poll for price and wait until a non-zero value is confirmed.
-        Retry every 10 seconds for up to 240 seconds.
+        Retry every 1 second for up to 30 seconds.
         """
         logger.info(f"Waiting for initial confirmed price for {TICKER}...")
         start_time = asyncio.get_event_loop().time()
-        timeout = 240
-        interval = 10
+        timeout = 30
+        interval = 1
 
         while not self._shutdown_event.is_set():
             try:
@@ -111,7 +117,8 @@ class GridEngine:
 
             elapsed = asyncio.get_event_loop().time() - start_time
             if elapsed >= timeout:
-                logger.error(f"Timed out waiting for initial price after {timeout}s")
+                logger.critical(f"CRITICAL: Timed out waiting for initial price after {timeout}s. Exiting.")
+                self._shutdown_event.set()
                 break
 
             logger.info(f"Price not yet available, retrying in {interval}s... (Elapsed: {int(elapsed)}s)")
@@ -152,6 +159,21 @@ class GridEngine:
                 await asyncio.wait_for(self._shutdown_event.wait(), timeout=self.config.health_log_interval_seconds)
             except asyncio.TimeoutError:
                 pass
+
+    async def _write_fresh_anchor_ask(self):
+        """
+        Fetches the current ask price and writes it to G7.
+        Used to reset the anchor and trigger a sheet recalculation.
+        """
+        try:
+            bid, ask = await self.broker.get_bid_ask(TICKER)
+            if ask > 0:
+                await self.sheet.write_anchor_ask(ask)
+                logger.info(f"Fresh anchor ask {ask} written to G7.")
+            else:
+                logger.warning("Could not write fresh anchor ask: ask price is 0.")
+        except Exception as e:
+            logger.error(f"Failed to write fresh anchor ask: {e}")
 
     async def _heartbeat_periodic(self):
         while not self._shutdown_event.is_set():
@@ -261,6 +283,12 @@ class GridEngine:
         # 2. Circuit Breaker
         positions = await self.broker.get_positions()
         broker_shares = positions.get(TICKER, 0)
+
+        # Bug 1 Fix: Write G7 only after a full sell cycle complete
+        if self.last_broker_shares > 0 and broker_shares == 0:
+            logger.info("Full sell cycle detected (shares went to 0). Updating G7 anchor.")
+            await self._write_fresh_anchor_ask()
+
         sheet_shares = sum(row.shares for row in self.grid_state.rows.values() if row.has_y)
         mismatch_active = False
 
@@ -359,13 +387,13 @@ class GridEngine:
                         if row.row_index == 7 and distal_y == 0:
                             # Anchor acquisition!
                             logger.info("Anchor acquisition condition met for row 7")
+                            # We check spread using a fresh ask but we DO NOT write it to G7 here.
+                            # We use the existing buy_price from the sheet (calculated from current G7).
                             bid, ask = await self.broker.get_bid_ask(TICKER)
                             if self.spread_guard.is_too_wide(bid, ask):
                                 continue
 
-                            await self.sheet.write_anchor_ask(ask)
-                            buy_price = ask + self.config.anchor_buy_offset
-                            logger.info(f"Placing anchor BUY for row 7 at {buy_price} (ask: {ask}, offset: {self.config.anchor_buy_offset})")
+                            logger.info(f"Placing anchor BUY for row 7 at {buy_price} (sheet-derived)")
                         else:
                             logger.info(f"Placing missing BUY for empty row {row.row_index}")
 
@@ -409,6 +437,9 @@ class GridEngine:
                     if row.status != "IDLE":
                         await self.sheet.update_row_status(row.row_index, "IDLE")
 
+        # Update last broker shares at end of tick
+        self.last_broker_shares = broker_shares
+
     def _handle_order_update(self, result: OrderResult):
         order_id = result.order_id
         if result.status == 'filled':
@@ -440,6 +471,14 @@ class GridEngine:
             row_index, action = self.order_manager.mark_cancelled(order_id)
             if row_index:
                 logger.info(f"Order {order_id} for row {row_index} {result.status}. Stopping tracking.")
+
+                # Bug 1 Fix: Write G7 if anchor buy was cancelled with 0 fill
+                if row_index == 7 and action == 'BUY':
+                    filled_qty = result.filled_qty if result.filled_qty is not None else 0
+                    if filled_qty == 0:
+                        logger.info("Anchor BUY cancelled/errored with 0 fill. Updating G7 anchor.")
+                        asyncio.create_task(self._write_fresh_anchor_ask())
+
                 # We do NOT automatically revert status to IDLE/OWNED here
                 # because the next _tick will see the order is missing and decide what to do
                 # (e.g. replace it if it's still in window).
