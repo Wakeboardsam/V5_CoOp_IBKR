@@ -293,19 +293,23 @@ class GridEngine:
                         self.order_manager.track(row.row_index, OrderResult(order_id=order_id, status='submitted'), 'SELL',
                                                broker=self.broker, on_update=self._handle_order_update)
 
-                        result = await self.broker.place_limit_order(
-                            ticker=TICKER, action='SELL', qty=row.shares,
-                            limit_price=row.sell_price, on_update=self._handle_order_update,
-                            order_id=order_id
-                        )
-                        if result.status in ('submitted', 'filled'):
-                            new_status = f"WORKING_SELL:{result.order_id}"
-                            await self.sheet.update_row_status(row.row_index, new_status)
-                        elif result.status == 'error':
-                            self.order_manager.mark_cancelled(result.order_id)
-                            if result.error_code == 10329:
-                                logger.error(f"LOUD ALERT: Error 10329 for row {row.row_index}. Marking as FAILED.")
-                                await self.sheet.update_row_status(row.row_index, "FAILED")
+                        try:
+                            result = await self.broker.place_limit_order(
+                                ticker=TICKER, action='SELL', qty=row.shares,
+                                limit_price=row.sell_price, on_update=self._handle_order_update,
+                                order_id=order_id
+                            )
+                            if result.status in ('submitted', 'filled'):
+                                new_status = f"WORKING_SELL:{result.order_id}"
+                                await self.sheet.update_row_status(row.row_index, new_status)
+                            elif result.status == 'error':
+                                self.order_manager.mark_cancelled(result.order_id)
+                                if result.error_code == 10329:
+                                    logger.error(f"LOUD ALERT: Error 10329 for row {row.row_index}. Marking as FAILED.")
+                                    await self.sheet.update_row_status(row.row_index, "FAILED")
+                        except Exception as e:
+                            logger.error(f"Exception during SELL order placement for row {row.row_index}: {e}")
+                            self.order_manager.mark_cancelled(order_id)
                 elif row.row_index > distal_y:
                     if mismatch_active:
                         logger.warning(f"Skipping BUY order for row {row.row_index} due to share mismatch")
@@ -336,18 +340,22 @@ class GridEngine:
                         self.order_manager.track(row.row_index, OrderResult(order_id=order_id, status='submitted'), 'BUY',
                                                broker=self.broker, on_update=self._handle_order_update)
 
-                        result = await self.broker.place_limit_order(
-                            ticker=TICKER, action='BUY', qty=row.shares,
-                            limit_price=buy_price, on_update=self._handle_order_update,
-                            order_id=order_id
-                        )
-                        if result.status in ('submitted', 'filled'):
-                            await self.sheet.update_row_status(row.row_index, f"WORKING_BUY:{result.order_id}")
-                        elif result.status == 'error':
-                            self.order_manager.mark_cancelled(result.order_id)
-                            if result.error_code == 10329:
-                                logger.error(f"LOUD ALERT: Error 10329 for row {row.row_index}. Marking as FAILED.")
-                                await self.sheet.update_row_status(row.row_index, "FAILED")
+                        try:
+                            result = await self.broker.place_limit_order(
+                                ticker=TICKER, action='BUY', qty=row.shares,
+                                limit_price=buy_price, on_update=self._handle_order_update,
+                                order_id=order_id
+                            )
+                            if result.status in ('submitted', 'filled'):
+                                await self.sheet.update_row_status(row.row_index, f"WORKING_BUY:{result.order_id}")
+                            elif result.status == 'error':
+                                self.order_manager.mark_cancelled(result.order_id)
+                                if result.error_code == 10329:
+                                    logger.error(f"LOUD ALERT: Error 10329 for row {row.row_index}. Marking as FAILED.")
+                                    await self.sheet.update_row_status(row.row_index, "FAILED")
+                        except Exception as e:
+                            logger.error(f"Exception during BUY order placement for row {row.row_index}: {e}")
+                            self.order_manager.mark_cancelled(order_id)
             else:
                 # Outside window
                 # Cancel any active orders for this row
