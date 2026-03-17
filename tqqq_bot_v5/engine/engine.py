@@ -256,6 +256,10 @@ class GridEngine:
 
         # 5. Grid Evaluation
         for row in self.grid_state.rows.values():
+            if row.status == 'FAILED':
+                logger.debug(f"Row {row.row_index} is marked FAILED, skipping.")
+                continue
+
             in_window = row.row_index in window_range
 
             # Parse existing status to check for current orders and historical IDs
@@ -273,8 +277,8 @@ class GridEngine:
                 if not self.order_manager.is_tracked(active_order_id):
                     logger.info(f"Re-tracking order {active_order_id} from sheet status for row {row.row_index}")
                     action = 'SELL' if "WORKING_SELL" in row.status else 'BUY'
-                    self.broker.subscribe_to_fill(active_order_id, self._on_fill)
-                    self.order_manager.track(row.row_index, OrderResult(order_id=active_order_id, status='submitted'), action)
+                    self.order_manager.track(row.row_index, OrderResult(order_id=active_order_id, status='submitted'), action,
+                                           broker=self.broker, on_update=self._handle_order_update)
 
             if in_window:
                 if row.has_y:
@@ -286,12 +290,15 @@ class GridEngine:
                         logger.info(f"Placing missing SELL for owned row {row.row_index}")
                         result = await self.broker.place_limit_order(
                             ticker=TICKER, action='SELL', qty=row.shares,
-                            limit_price=row.sell_price, on_fill=self._on_fill
+                            limit_price=row.sell_price, on_update=self._handle_order_update
                         )
-                        if result.status == 'submitted':
-                            self.order_manager.track(row.row_index, result, 'SELL')
+                        if result.status in ('submitted', 'filled'):
+                            self.order_manager.track(row.row_index, result, 'SELL', broker=self.broker, on_update=self._handle_order_update)
                             new_status = f"WORKING_SELL:{result.order_id}"
                             await self.sheet.update_row_status(row.row_index, new_status)
+                        elif result.status == 'error' and result.error_code == 10329:
+                            logger.error(f"LOUD ALERT: Error 10329 for row {row.row_index}. Marking as FAILED.")
+                            await self.sheet.update_row_status(row.row_index, "FAILED")
                 elif row.row_index > distal_y:
                     if mismatch_active:
                         logger.warning(f"Skipping BUY order for row {row.row_index} due to share mismatch")
@@ -319,11 +326,14 @@ class GridEngine:
 
                         result = await self.broker.place_limit_order(
                             ticker=TICKER, action='BUY', qty=row.shares,
-                            limit_price=buy_price, on_fill=self._on_fill
+                            limit_price=buy_price, on_update=self._handle_order_update
                         )
-                        if result.status == 'submitted':
-                            self.order_manager.track(row.row_index, result, 'BUY')
+                        if result.status in ('submitted', 'filled'):
+                            self.order_manager.track(row.row_index, result, 'BUY', broker=self.broker, on_update=self._handle_order_update)
                             await self.sheet.update_row_status(row.row_index, f"WORKING_BUY:{result.order_id}")
+                        elif result.status == 'error' and result.error_code == 10329:
+                            logger.error(f"LOUD ALERT: Error 10329 for row {row.row_index}. Marking as FAILED.")
+                            await self.sheet.update_row_status(row.row_index, "FAILED")
             else:
                 # Outside window
                 # Cancel any active orders for this row
@@ -343,29 +353,38 @@ class GridEngine:
                     if row.status != "IDLE":
                         await self.sheet.update_row_status(row.row_index, "IDLE")
 
-    def _on_fill(self, fill_details: dict):
-        self.last_fill_time = datetime.now()
-        order_id = fill_details.get('order_id')
-        row_index, action = self.order_manager.mark_filled(order_id)
+    def _handle_order_update(self, result: OrderResult):
+        order_id = result.order_id
+        if result.status == 'filled':
+            self.last_fill_time = datetime.now()
+            row_index, action = self.order_manager.mark_filled(order_id)
 
-        if row_index:
-            # Update status in sheet
-            if action == 'BUY':
-                new_status = f"OWNED:{order_id}"
-            else: # SELL
-                new_status = "IDLE"
+            if row_index:
+                # Update status in sheet
+                if action == 'BUY':
+                    new_status = f"OWNED:{order_id}"
+                else: # SELL
+                    new_status = "IDLE"
 
-            asyncio.create_task(self.sheet.update_row_status(row_index, new_status))
+                asyncio.create_task(self.sheet.update_row_status(row_index, new_status))
 
-            # Prepare data for sheet logging in Fills tab
-            log_data = {
-                "row_id": str(row_index),
-                "type": action,
-                "filled_price": fill_details.get('price'),
-                "filled_qty": fill_details.get('qty'),
-                "order_id": order_id
-            }
-            asyncio.create_task(self.sheet.log_fill(log_data))
-            logger.info(f"Logged fill for row {row_index}, order {order_id}")
-        else:
-            logger.warning(f"Received fill for untracked order {order_id}")
+                # Prepare data for sheet logging in Fills tab
+                log_data = {
+                    "row_id": str(row_index),
+                    "type": action,
+                    "filled_price": result.filled_price,
+                    "filled_qty": result.filled_qty,
+                    "order_id": order_id
+                }
+                asyncio.create_task(self.sheet.log_fill(log_data))
+                logger.info(f"Logged fill for row {row_index}, order {order_id}")
+            else:
+                logger.warning(f"Received fill for untracked order {order_id}")
+        elif result.status in ('cancelled', 'error'):
+            row_index, action = self.order_manager.mark_cancelled(order_id)
+            if row_index:
+                logger.info(f"Order {order_id} for row {row_index} {result.status}. Stopping tracking.")
+                # We do NOT automatically revert status to IDLE/OWNED here
+                # because the next _tick will see the order is missing and decide what to do
+                # (e.g. replace it if it's still in window).
+                # UNLESS it was a 10329 error which we handle in _tick by marking FAILED.
