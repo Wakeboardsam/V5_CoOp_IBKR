@@ -20,6 +20,7 @@ def mock_broker():
     broker.get_positions = AsyncMock(return_value={"TQQQ": 0})
     broker.subscribe_to_updates = MagicMock()
     broker.cancel_order = AsyncMock(return_value=True)
+    broker.get_next_order_id = AsyncMock(return_value="ORD-123")
     return broker
 
 @pytest.fixture
@@ -83,6 +84,8 @@ async def test_transition_owned_to_working_sell(mock_broker, mock_sheet, config)
     engine = GridEngine(mock_broker, mock_sheet, config)
     # Row 10 is in window
     with patch.object(GridState, 'distal_y_row', 10):
+        # We need to make sure get_next_order_id returns something consistent if we check it
+        mock_broker.get_next_order_id.return_value = "SELL-456"
         await engine._tick()
 
     mock_sheet.update_row_status.assert_called_with(10, "WORKING_SELL:SELL-456")

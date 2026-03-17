@@ -21,6 +21,7 @@ def mock_broker():
     broker.get_open_orders = AsyncMock(return_value=[])
     broker.get_positions = AsyncMock(return_value={"TQQQ": 0})
     broker.subscribe_to_updates = MagicMock()
+    broker.get_next_order_id = AsyncMock(return_value="ORD-NEW")
     return broker
 
 @pytest.fixture
@@ -80,7 +81,7 @@ async def test_share_mismatch_warn(mock_broker, mock_sheet, config):
 
     # 3. Should place SELL order for row 7 (even with mismatch)
     mock_broker.place_limit_order.assert_any_call(
-        ticker="TQQQ", action="SELL", qty=10, limit_price=105.0, on_update=engine._handle_order_update
+        ticker="TQQQ", action="SELL", qty=10, limit_price=105.0, on_update=engine._handle_order_update, order_id="ORD-NEW"
     )
 
     # 4. Should SKIP BUY order for row 8
@@ -147,5 +148,5 @@ async def test_share_mismatch_warn_log_error_fails(mock_broker, mock_sheet, conf
 
     # Bot should NOT crash and should STILL place the SELL order
     mock_broker.place_limit_order.assert_any_call(
-        ticker="TQQQ", action="SELL", qty=10, limit_price=105.0, on_update=engine._handle_order_update
+        ticker="TQQQ", action="SELL", qty=10, limit_price=105.0, on_update=engine._handle_order_update, order_id="ORD-NEW"
     )

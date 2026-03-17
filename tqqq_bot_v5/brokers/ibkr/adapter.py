@@ -129,6 +129,12 @@ class IBKRAdapter(BrokerBase):
         finally:
             self.ib.cancelMktData(contract)
 
+    async def get_next_order_id(self) -> str:
+        """
+        Returns the next available order ID from IBKR.
+        """
+        return str(self.ib.client.getReqId())
+
     async def get_wallet_balance(self) -> float:
         """
         Returns the USD balance from the selected conservative account tag.
@@ -175,7 +181,8 @@ class IBKRAdapter(BrokerBase):
         self, ticker: str, action: str,
         qty: int, limit_price: float,
         extended_hours: bool = True,
-        on_update: Optional[Callable] = None
+        on_update: Optional[Callable] = None,
+        order_id: Optional[str] = None
     ) -> OrderResult:
         from brokers.ibkr.order_builder import get_dynamic_exchange, get_dynamic_tif
         exchange = get_dynamic_exchange()
@@ -188,11 +195,18 @@ class IBKRAdapter(BrokerBase):
         order.tif = tif
         order.outsideRth = True
 
-        trade = self.ib.placeOrder(contract, order)
-        order_id = str(order.orderId)
+        if order_id:
+            order.orderId = int(order_id)
+        else:
+            # If no ID provided, let ib_insync assign one or get it now
+            order.orderId = self.ib.client.getReqId()
+
+        final_order_id = str(order.orderId)
 
         if on_update:
-            self._on_update_callbacks[order_id] = on_update
+            self._on_update_callbacks[final_order_id] = on_update
+
+        trade = self.ib.placeOrder(contract, order)
 
         # Wait for status to be 'Submitted', 'PreSubmitted', or terminal
         while not trade.isDone() and trade.orderStatus.status not in ('Submitted', 'PreSubmitted'):
@@ -202,7 +216,7 @@ class IBKRAdapter(BrokerBase):
                 # If it's a known terminal error for the order
                 if err_code == 10329:
                     return OrderResult(
-                        order_id=order_id,
+                        order_id=final_order_id,
                         status='error',
                         error_code=err_code,
                         error_msg=err_msg
@@ -210,10 +224,10 @@ class IBKRAdapter(BrokerBase):
 
         status = trade.orderStatus.status
         if status in ('Submitted', 'PreSubmitted'):
-            return OrderResult(order_id=order_id, status='submitted')
+            return OrderResult(order_id=final_order_id, status='submitted')
         elif status == 'Filled':
             return OrderResult(
-                order_id=order_id,
+                order_id=final_order_id,
                 status='filled',
                 filled_price=trade.orderStatus.avgFillPrice,
                 filled_qty=trade.orderStatus.filled
@@ -225,7 +239,7 @@ class IBKRAdapter(BrokerBase):
                 err_code, err_msg = self._last_error[order.orderId]
 
             return OrderResult(
-                order_id=order_id,
+                order_id=final_order_id,
                 status='error',
                 error_code=err_code,
                 error_msg=err_msg,
