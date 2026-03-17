@@ -164,12 +164,12 @@ async def test_anchor_acquisition(mock_broker, mock_sheet, config):
     engine = GridEngine(mock_broker, mock_sheet, config)
     await engine._tick()
 
-    # Should write anchor ask to G7
-    mock_sheet.write_anchor_ask.assert_called_with(100.0)
+    # Bug 1 Fix: Should NOT write anchor ask to G7 on buy placement
+    mock_sheet.write_anchor_ask.assert_not_called()
 
-    # Should place buy order at ask + offset (100.0 + 0.05 = 100.05)
+    # Should place buy order at price from sheet
     mock_broker.place_limit_order.assert_any_call(
-        ticker="TQQQ", action="BUY", qty=10, limit_price=100.05, on_update=engine._handle_order_update, order_id="ORD-123"
+        ticker="TQQQ", action="BUY", qty=10, limit_price=100.0, on_update=engine._handle_order_update, order_id="ORD-123"
     )
 
 @pytest.mark.asyncio
@@ -249,6 +249,52 @@ async def test_engine_boundary_regeneration(mock_broker, mock_sheet, config):
     assert not engine.order_manager.is_tracked("TEST-3")
     assert engine._is_weekend_gap is True
 
+
+@pytest.mark.asyncio
+async def test_anchor_update_on_full_sell_cycle(mock_broker, mock_sheet, config):
+    # Initial state: owned 10 shares
+    grid_state = GridState(
+        rows={
+            7: GridRow(row_index=7, status="OWNED:ORD-1", has_y=True, sell_price=105.0, buy_price=100.0, shares=10)
+        }
+    )
+    mock_sheet.fetch_grid.return_value = grid_state
+    mock_broker.get_positions.return_value = {"TQQQ": 10}
+    mock_broker.get_wallet_balance.return_value = 50000.0
+    mock_broker.get_bid_ask.return_value = (100.0, 101.0)
+
+    engine = GridEngine(mock_broker, mock_sheet, config)
+    engine.last_broker_shares = 10
+
+    # Tick where shares become 0
+    mock_broker.get_positions.return_value = {"TQQQ": 0}
+    # Need to update grid state so CB doesn't trip if we don't care about it here
+    # but _tick fetch_grid happens before CB.
+    grid_state.rows[7].has_y = False
+    grid_state.rows[7].shares = 0
+
+    await engine._tick()
+
+    # Should write fresh anchor ask to G7
+    mock_sheet.write_anchor_ask.assert_called_with(101.0)
+    assert engine.last_broker_shares == 0
+
+@pytest.mark.asyncio
+async def test_anchor_update_on_cancelled_buy(mock_broker, mock_sheet, config):
+    mock_broker.get_bid_ask.return_value = (102.0, 103.0)
+    engine = GridEngine(mock_broker, mock_sheet, config)
+
+    # Simulate a cancelled order for row 7 action BUY with 0 fill
+    result = OrderResult(order_id="ORD-7", status="cancelled", filled_qty=0)
+    engine.order_manager.track(7, OrderResult(order_id="ORD-7", status="submitted"), "BUY")
+
+    engine._handle_order_update(result)
+
+    # Give some time for the background task
+    await asyncio.sleep(0.1)
+
+    # Should write fresh anchor ask to G7
+    mock_sheet.write_anchor_ask.assert_called_with(103.0)
 
 @pytest.mark.asyncio
 async def test_no_anchor_write_if_already_working(mock_broker, mock_sheet, config):
