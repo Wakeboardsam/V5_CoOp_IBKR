@@ -8,6 +8,8 @@ from brokers.ibkr.order_builder import get_dynamic_exchange
 @pytest.fixture
 def mock_ib():
     ib = MagicMock(spec=IB)
+    ib.client = MagicMock()
+    ib.client.getReqId.return_value = 123
     # Mock bracketOrder to return some Order objects
     def mock_bracket(action, qty, lmt, takeProfitPrice, stopLossPrice):
         parent = LimitOrder(action, qty, lmt)
@@ -237,7 +239,7 @@ async def test_place_limit_order_outside_rth(mock_ib):
 
     with patch('brokers.ibkr.order_builder.get_dynamic_exchange', return_value='SMART'):
         with patch('brokers.ibkr.order_builder.get_dynamic_tif', return_value='GTC'):
-            await adapter.place_limit_order('TQQQ', 'BUY', 10, 50.0)
+            await adapter.place_limit_order('TQQQ', 'BUY', 10, 50.0, order_id="123")
 
             # Get the order passed to placeOrder
             args, kwargs = mock_ib.placeOrder.call_args
@@ -245,6 +247,7 @@ async def test_place_limit_order_outside_rth(mock_ib):
 
             assert order.outsideRth is True
             assert order.tif == 'GTC'
+            assert order.orderId == 123
 
 @pytest.mark.asyncio
 async def test_get_price_contract_routing(mock_ib):
@@ -310,7 +313,7 @@ async def test_place_limit_order_contract_routing(mock_ib):
 
     with patch('brokers.ibkr.order_builder.get_dynamic_exchange', return_value='OVERNIGHT'):
         with patch('brokers.ibkr.order_builder.get_dynamic_tif', return_value='OND'):
-            await adapter.place_limit_order('TQQQ', 'BUY', 10, 50.0)
+            await adapter.place_limit_order('TQQQ', 'BUY', 10, 50.0, order_id="123")
 
             # Check the contract passed to placeOrder
             contract_arg, order_arg = mock_ib.placeOrder.call_args[0]

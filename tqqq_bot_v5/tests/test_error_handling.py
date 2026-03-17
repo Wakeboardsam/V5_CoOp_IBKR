@@ -14,6 +14,7 @@ def mock_broker():
     broker.get_bid_ask = AsyncMock(return_value=(99.95, 100.05))
     broker.get_open_orders = AsyncMock(return_value=[])
     broker.get_positions = AsyncMock(return_value={"TQQQ": 0})
+    broker.get_next_order_id = AsyncMock(return_value="ORD-FAILED")
     return broker
 
 @pytest.fixture
@@ -54,7 +55,8 @@ async def test_handle_error_10329(mock_broker, mock_sheet, config):
 
     # Should mark as FAILED
     mock_sheet.update_row_status.assert_called_with(10, "FAILED")
-    # Should NOT be tracking the order
+    # Should NOT be tracking the order (it should have been removed by mark_cancelled/mark_filled or similar)
+    # Actually mark_cancelled is called when status is error
     assert not engine.order_manager.is_tracked("ORD-FAILED")
 
 @pytest.mark.asyncio

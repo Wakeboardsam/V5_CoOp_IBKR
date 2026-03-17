@@ -38,6 +38,9 @@ class BrokerBase(ABC):
     async def get_wallet_balance(self) -> float: ...
 
     @abstractmethod
+    async def get_next_order_id(self) -> str: ...
+
+    @abstractmethod
     async def place_bracket_order(
         self, ticker: str, action: str,  # 'BUY' | 'SELL'
         qty: int, limit_price: float, profit_price: float,
@@ -50,7 +53,8 @@ class BrokerBase(ABC):
         self, ticker: str, action: str,
         qty: int, limit_price: float,
         extended_hours: bool = True,
-        on_update: Optional[Callable] = None
+        on_update: Optional[Callable] = None,
+        order_id: Optional[str] = None
     ) -> OrderResult: ...
 
     @abstractmethod

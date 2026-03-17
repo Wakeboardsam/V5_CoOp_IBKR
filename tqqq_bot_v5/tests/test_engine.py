@@ -22,6 +22,7 @@ def mock_broker():
     broker.get_open_orders = AsyncMock(return_value=[])
     broker.get_positions = AsyncMock(return_value={"TQQQ": 10})
     broker.subscribe_to_updates = MagicMock()
+    broker.get_next_order_id = AsyncMock(return_value="ORD-123")
     return broker
 
 @pytest.fixture
@@ -66,6 +67,9 @@ async def test_engine_places_sell_and_buy_limits(mock_broker, mock_sheet, config
 
     # Should have called place_limit_order twice
     assert mock_broker.place_limit_order.call_count == 2
+
+    # Verify get_next_order_id was called
+    assert mock_broker.get_next_order_id.call_count == 2
 
     # Check SELL for row 7
     assert engine.order_manager.has_open_sell(7)
@@ -165,7 +169,7 @@ async def test_anchor_acquisition(mock_broker, mock_sheet, config):
 
     # Should place buy order at ask + offset (100.0 + 0.05 = 100.05)
     mock_broker.place_limit_order.assert_any_call(
-        ticker="TQQQ", action="BUY", qty=10, limit_price=100.05, on_update=engine._handle_order_update
+        ticker="TQQQ", action="BUY", qty=10, limit_price=100.05, on_update=engine._handle_order_update, order_id="ORD-123"
     )
 
 @pytest.mark.asyncio

@@ -24,6 +24,9 @@ class SchwabAdapter(BrokerBase):
     async def get_wallet_balance(self) -> float:
         raise NotImplementedError
 
+    async def get_next_order_id(self) -> str:
+        raise NotImplementedError
+
     async def place_bracket_order(
         self, ticker: str, action: str,
         qty: int, limit_price: float, profit_price: float,
@@ -42,7 +45,8 @@ class SchwabAdapter(BrokerBase):
         self, ticker: str, action: str,
         qty: int, limit_price: float,
         extended_hours: bool = True,
-        on_update: Optional[Callable] = None
+        on_update: Optional[Callable] = None,
+        order_id: Optional[str] = None
     ) -> OrderResult:
         raise NotImplementedError
 
