@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import signal
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 import zoneinfo
 from typing import Optional
 
@@ -30,6 +30,7 @@ class GridEngine:
         self.last_fill_time: Optional[datetime] = None
         self.last_broker_shares = 0
         self.pending_status_updates: dict[int, str] = {}
+        self.row_cooldowns: dict[int, datetime] = {}
         self._shutdown_event = asyncio.Event()
         tz = zoneinfo.ZoneInfo("America/New_York")
         self._last_grid_regeneration = datetime.min.replace(tzinfo=tz)
@@ -372,6 +373,14 @@ class GridEngine:
 
                     in_window = row.row_index in window_range
 
+                    # Cooldown check
+                    if row.row_index in self.row_cooldowns:
+                        if datetime.now() < self.row_cooldowns[row.row_index]:
+                            logger.debug(f"Row {row.row_index} is in cooldown, skipping.")
+                            continue
+                        else:
+                            del self.row_cooldowns[row.row_index]
+
                     # Parse existing status to check for current orders and historical IDs
                     status_parts = row.status.split('|')
                     active_order_id = None
@@ -414,9 +423,11 @@ class GridEngine:
                                     self._update_row_status_in_memory(row.row_index, f"WORKING_SELL:{result.order_id}")
                                 elif result.status == 'error':
                                     self.order_manager.mark_cancelled(result.order_id)
-                                    if result.error_code == 10329:
-                                        logger.error(f"LOUD ALERT: Error 10329 for row {row.row_index}. Marking as FAILED.")
-                                        self._update_row_status_in_memory(row.row_index, "FAILED")
+                                    self.row_cooldowns[row.row_index] = datetime.now() + timedelta(minutes=5)
+                                    # Fix: Preserve Owned state for SELL
+                                    new_status = f"OWNED:{owned_id if owned_id else 0}"
+                                    logger.error(f"SELL order for row {row.row_index} failed (Code: {result.error_code}). Reverting to {new_status} and cooling down.")
+                                    self._update_row_status_in_memory(row.row_index, new_status)
                         elif row.row_index > distal_y:
                             if mismatch_active:
                                 logger.warning(f"Skipping BUY order for row {row.row_index} due to share mismatch")
@@ -458,9 +469,10 @@ class GridEngine:
                                     self._update_row_status_in_memory(row.row_index, f"WORKING_BUY:{result.order_id}")
                                 elif result.status == 'error':
                                     self.order_manager.mark_cancelled(result.order_id)
-                                    if result.error_code == 10329:
-                                        logger.error(f"LOUD ALERT: Error 10329 for row {row.row_index}. Marking as FAILED.")
-                                        self._update_row_status_in_memory(row.row_index, "FAILED")
+                                    self.row_cooldowns[row.row_index] = datetime.now() + timedelta(minutes=5)
+                                    # Fix: Revert to IDLE for BUY instead of FAILED
+                                    logger.error(f"BUY order for row {row.row_index} failed (Code: {result.error_code}). Reverting to IDLE and cooling down.")
+                                    self._update_row_status_in_memory(row.row_index, "IDLE")
                     else:
                         # Outside window
                         # Cancel any active orders for this row
@@ -536,7 +548,20 @@ class GridEngine:
                         logger.info("Anchor BUY cancelled/errored with 0 fill. Updating G7 anchor.")
                         asyncio.create_task(self._write_fresh_anchor_ask())
 
-                # We do NOT automatically revert status to IDLE/OWNED here
-                # because the next _tick will see the order is missing and decide what to do
-                # (e.g. replace it if it's still in window).
-                # UNLESS it was a 10329 error which we handle in _tick by marking FAILED.
+                if result.status == 'error':
+                    self.row_cooldowns[row_index] = datetime.now() + timedelta(minutes=5)
+                    # Revert status immediately so sheet doesn't show WORKING indefinitely if _tick is slow
+                    if action == 'SELL':
+                        # Try to find existing ID or use 0
+                        owned_id = "0"
+                        if self.grid_state and row_index in self.grid_state.rows:
+                            status = self.grid_state.rows[row_index].status
+                            if "OWNED:" in status:
+                                owned_id = status.split("OWNED:")[1].split("|")[0]
+                        new_status = f"OWNED:{owned_id}"
+                    else:
+                        new_status = "IDLE"
+
+                    logger.info(f"Setting {new_status} and cooldown for row {row_index} due to async order error.")
+                    self._update_row_status_in_memory(row_index, new_status)
+                    asyncio.create_task(self._sync_to_sheet())

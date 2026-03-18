@@ -1,5 +1,5 @@
 name: "TQQQ Grid Bot v5"
-version: "5.2.11"
+version: "5.2.12"
 slug: "tqqq_bot_v5"
 description: "Asyncio trading bot for TQQQ grid strategy on IBKR"
 arch:
