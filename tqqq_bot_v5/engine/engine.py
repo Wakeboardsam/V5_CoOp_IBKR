@@ -29,6 +29,7 @@ class GridEngine:
         self.last_price = 0.0
         self.last_fill_time: Optional[datetime] = None
         self.last_broker_shares = 0
+        self.pending_status_updates: dict[int, str] = {}
         self._shutdown_event = asyncio.Event()
         tz = zoneinfo.ZoneInfo("America/New_York")
         self._last_grid_regeneration = datetime.min.replace(tzinfo=tz)
@@ -189,6 +190,41 @@ class GridEngine:
             except asyncio.TimeoutError:
                 pass
 
+    def _update_row_status_in_memory(self, row_index: int, status: str):
+        """
+        Updates the internal grid state and queues the status for a sheet write.
+        Ensures has_y is kept in sync with the status (OWNED or WORKING_SELL = Y).
+        """
+        if self.grid_state and row_index in self.grid_state.rows:
+            row = self.grid_state.rows[row_index]
+            row.status = status
+            # Mirror has_y logic: OWNED or WORKING_SELL implies we have it
+            row.has_y = status.startswith("OWNED:") or status.startswith("WORKING_SELL:")
+
+        self.pending_status_updates[row_index] = status
+        logger.debug(f"Queued status update for row {row_index}: {status}")
+
+    async def _sync_to_sheet(self):
+        """
+        Attempts to write all pending status updates to the Google Sheet.
+        Successfully written updates are removed from the queue.
+        """
+        if not self.pending_status_updates:
+            return
+
+        logger.info(f"Syncing {len(self.pending_status_updates)} pending status updates to sheet...")
+        # Create a copy to iterate over while potentially modifying the original
+        to_sync = list(self.pending_status_updates.items())
+
+        for row_index, status in to_sync:
+            try:
+                await self.sheet.update_row_status(row_index, status)
+                # If successful, remove from pending
+                if self.pending_status_updates.get(row_index) == status:
+                    del self.pending_status_updates[row_index]
+            except Exception as e:
+                logger.error(f"Failed to sync status for row {row_index} to sheet: {e}")
+                # We leave it in pending_status_updates to retry next time
 
     async def _check_daily_grid_regeneration(self):
         """
@@ -280,6 +316,16 @@ class GridEngine:
         if not self.grid_state:
             return
 
+        # 1.1 Reconcile with pending updates
+        # If we have a pending update that hasn't hit the sheet yet, use it locally
+        for row_index, pending_status in self.pending_status_updates.items():
+            if row_index in self.grid_state.rows:
+                row = self.grid_state.rows[row_index]
+                if row.status != pending_status:
+                    logger.debug(f"Overriding row {row_index} status with pending update: {pending_status}")
+                    row.status = pending_status
+                    row.has_y = pending_status.startswith("OWNED:") or pending_status.startswith("WORKING_SELL:")
+
         # 2. Circuit Breaker
         positions = await self.broker.get_positions()
         broker_shares = positions.get(TICKER, 0)
@@ -316,126 +362,128 @@ class GridEngine:
         open_orders = await self.broker.get_open_orders()
         broker_order_ids = {o['order_id'] for o in open_orders}
 
-        # 5. Grid Evaluation
-        for row in self.grid_state.rows.values():
-            if row.status == 'FAILED':
-                logger.debug(f"Row {row.row_index} is marked FAILED, skipping.")
-                continue
-
-            in_window = row.row_index in window_range
-
-            # Parse existing status to check for current orders and historical IDs
-            status_parts = row.status.split('|')
-            active_order_id = None
-            owned_id = None
-            for part in status_parts:
-                if part.startswith("WORKING_SELL:") or part.startswith("WORKING_BUY:"):
-                    active_order_id = part.split(":")[1]
-                elif part.startswith("OWNED:"):
-                    owned_id = part.split(":")[1]
-
-            # If an order is in Column C but not tracked, subscribe/track it
-            if active_order_id and active_order_id in broker_order_ids:
-                if not self.order_manager.is_tracked(active_order_id):
-                    logger.info(f"Re-tracking order {active_order_id} from sheet status for row {row.row_index}")
-                    action = 'SELL' if "WORKING_SELL" in row.status else 'BUY'
-                    self.order_manager.track(row.row_index, OrderResult(order_id=active_order_id, status='submitted'), action,
-                                           broker=self.broker, on_update=self._handle_order_update)
-
-            if in_window:
-                if row.has_y:
-                    # Expect active SELL order
-                    if not self.order_manager.has_open_sell(row.row_index):
-                        if getattr(self, '_is_weekend_gap', False):
-                            logger.debug(f"Skipping SELL order for row {row.row_index} due to weekend gap")
-                            continue
-                        logger.info(f"Placing missing SELL for owned row {row.row_index}")
-                        # Pre-register order ID to avoid race conditions with fast fills
-                        order_id = await self.broker.get_next_order_id()
-                        self.order_manager.track(row.row_index, OrderResult(order_id=order_id, status='submitted'), 'SELL',
-                                               broker=self.broker, on_update=self._handle_order_update)
-
-                        try:
-                            result = await self.broker.place_limit_order(
-                                ticker=TICKER, action='SELL', qty=row.shares,
-                                limit_price=row.sell_price, on_update=self._handle_order_update,
-                                order_id=order_id
-                            )
-                            if result.status in ('submitted', 'filled'):
-                                new_status = f"WORKING_SELL:{result.order_id}"
-                                await self.sheet.update_row_status(row.row_index, new_status)
-                            elif result.status == 'error':
-                                self.order_manager.mark_cancelled(result.order_id)
-                                if result.error_code == 10329:
-                                    logger.error(f"LOUD ALERT: Error 10329 for row {row.row_index}. Marking as FAILED.")
-                                    await self.sheet.update_row_status(row.row_index, "FAILED")
-                        except Exception as e:
-                            logger.error(f"Exception during SELL order placement for row {row.row_index}: {e}")
-                            self.order_manager.mark_cancelled(order_id)
-                elif row.row_index > distal_y:
-                    if mismatch_active:
-                        logger.warning(f"Skipping BUY order for row {row.row_index} due to share mismatch")
-                        continue
-                    if getattr(self, '_is_weekend_gap', False):
-                        logger.debug(f"Skipping BUY order for row {row.row_index} due to weekend gap")
+        try:
+            # 5. Grid Evaluation
+            for row in self.grid_state.rows.values():
+                try:
+                    if row.status == 'FAILED':
+                        logger.debug(f"Row {row.row_index} is marked FAILED, skipping.")
                         continue
 
-                    # Expect active BUY order
-                    if not self.order_manager.has_open_buy(row.row_index):
-                        buy_price = row.buy_price
+                    in_window = row.row_index in window_range
 
-                        if row.row_index == 7 and distal_y == 0:
-                            # Anchor acquisition!
-                            logger.info("Anchor acquisition condition met for row 7")
-                            # We check spread using a fresh ask but we DO NOT write it to G7 here.
-                            # We use the existing buy_price from the sheet (calculated from current G7).
-                            bid, ask = await self.broker.get_bid_ask(TICKER)
-                            if self.spread_guard.is_too_wide(bid, ask):
+                    # Parse existing status to check for current orders and historical IDs
+                    status_parts = row.status.split('|')
+                    active_order_id = None
+                    owned_id = None
+                    for part in status_parts:
+                        if part.startswith("WORKING_SELL:") or part.startswith("WORKING_BUY:"):
+                            active_order_id = part.split(":")[1]
+                        elif part.startswith("OWNED:"):
+                            owned_id = part.split(":")[1]
+
+                    # If an order is in Column C but not tracked, subscribe/track it
+                    if active_order_id and active_order_id in broker_order_ids:
+                        if not self.order_manager.is_tracked(active_order_id):
+                            logger.info(f"Re-tracking order {active_order_id} from sheet status for row {row.row_index}")
+                            action = 'SELL' if "WORKING_SELL" in row.status else 'BUY'
+                            self.order_manager.track(row.row_index, OrderResult(order_id=active_order_id, status='submitted'), action,
+                                                broker=self.broker, on_update=self._handle_order_update)
+
+                    if in_window:
+                        if row.has_y:
+                            # Expect active SELL order
+                            if not self.order_manager.has_open_sell(row.row_index):
+                                if getattr(self, '_is_weekend_gap', False):
+                                    logger.debug(f"Skipping SELL order for row {row.row_index} due to weekend gap")
+                                    continue
+                                logger.info(f"Placing missing SELL for owned row {row.row_index}")
+                                # Pre-register order ID to avoid race conditions with fast fills
+                                order_id = await self.broker.get_next_order_id()
+                                self.order_manager.track(row.row_index, OrderResult(order_id=order_id, status='submitted'), 'SELL',
+                                                    broker=self.broker, on_update=self._handle_order_update)
+
+                                result = await self.broker.place_limit_order(
+                                    ticker=TICKER, action='SELL', qty=row.shares,
+                                    limit_price=row.sell_price, on_update=self._handle_order_update,
+                                    order_id=order_id
+                                )
+                                if result.status == 'filled':
+                                    self._update_row_status_in_memory(row.row_index, "IDLE")
+                                elif result.status == 'submitted':
+                                    self._update_row_status_in_memory(row.row_index, f"WORKING_SELL:{result.order_id}")
+                                elif result.status == 'error':
+                                    self.order_manager.mark_cancelled(result.order_id)
+                                    if result.error_code == 10329:
+                                        logger.error(f"LOUD ALERT: Error 10329 for row {row.row_index}. Marking as FAILED.")
+                                        self._update_row_status_in_memory(row.row_index, "FAILED")
+                        elif row.row_index > distal_y:
+                            if mismatch_active:
+                                logger.warning(f"Skipping BUY order for row {row.row_index} due to share mismatch")
+                                continue
+                            if getattr(self, '_is_weekend_gap', False):
+                                logger.debug(f"Skipping BUY order for row {row.row_index} due to weekend gap")
                                 continue
 
-                            logger.info(f"Placing anchor BUY for row 7 at {buy_price} (sheet-derived)")
+                            # Expect active BUY order
+                            if not self.order_manager.has_open_buy(row.row_index):
+                                buy_price = row.buy_price
+
+                                if row.row_index == 7 and distal_y == 0:
+                                    # Anchor acquisition!
+                                    logger.info("Anchor acquisition condition met for row 7")
+                                    # We check spread using a fresh ask but we DO NOT write it to G7 here.
+                                    # We use the existing buy_price from the sheet (calculated from current G7).
+                                    bid, ask = await self.broker.get_bid_ask(TICKER)
+                                    if self.spread_guard.is_too_wide(bid, ask):
+                                        continue
+
+                                    logger.info(f"Placing anchor BUY for row 7 at {buy_price} (sheet-derived)")
+                                else:
+                                    logger.info(f"Placing missing BUY for empty row {row.row_index}")
+
+                                # Pre-register order ID to avoid race conditions with fast fills
+                                order_id = await self.broker.get_next_order_id()
+                                self.order_manager.track(row.row_index, OrderResult(order_id=order_id, status='submitted'), 'BUY',
+                                                    broker=self.broker, on_update=self._handle_order_update)
+
+                                result = await self.broker.place_limit_order(
+                                    ticker=TICKER, action='BUY', qty=row.shares,
+                                    limit_price=buy_price, on_update=self._handle_order_update,
+                                    order_id=order_id
+                                )
+                                if result.status == 'filled':
+                                    self._update_row_status_in_memory(row.row_index, f"OWNED:{result.order_id}")
+                                elif result.status == 'submitted':
+                                    self._update_row_status_in_memory(row.row_index, f"WORKING_BUY:{result.order_id}")
+                                elif result.status == 'error':
+                                    self.order_manager.mark_cancelled(result.order_id)
+                                    if result.error_code == 10329:
+                                        logger.error(f"LOUD ALERT: Error 10329 for row {row.row_index}. Marking as FAILED.")
+                                        self._update_row_status_in_memory(row.row_index, "FAILED")
+                    else:
+                        # Outside window
+                        # Cancel any active orders for this row
+                        if row.row_index in self.order_manager._row_to_orders:
+                            oids = list(self.order_manager._row_to_orders[row.row_index])
+                            for oid in oids:
+                                logger.info(f"Cancelling order {oid} for row {row.row_index} (outside window)")
+                                await self.broker.cancel_order(oid)
+                                self.order_manager.mark_cancelled(oid)
+
+                        # Update status
+                        if row.has_y:
+                            new_status = f"OWNED:{owned_id if owned_id else 0}"
+                            if row.status != new_status:
+                                self._update_row_status_in_memory(row.row_index, new_status)
                         else:
-                            logger.info(f"Placing missing BUY for empty row {row.row_index}")
-
-                        # Pre-register order ID to avoid race conditions with fast fills
-                        order_id = await self.broker.get_next_order_id()
-                        self.order_manager.track(row.row_index, OrderResult(order_id=order_id, status='submitted'), 'BUY',
-                                               broker=self.broker, on_update=self._handle_order_update)
-
-                        try:
-                            result = await self.broker.place_limit_order(
-                                ticker=TICKER, action='BUY', qty=row.shares,
-                                limit_price=buy_price, on_update=self._handle_order_update,
-                                order_id=order_id
-                            )
-                            if result.status in ('submitted', 'filled'):
-                                await self.sheet.update_row_status(row.row_index, f"WORKING_BUY:{result.order_id}")
-                            elif result.status == 'error':
-                                self.order_manager.mark_cancelled(result.order_id)
-                                if result.error_code == 10329:
-                                    logger.error(f"LOUD ALERT: Error 10329 for row {row.row_index}. Marking as FAILED.")
-                                    await self.sheet.update_row_status(row.row_index, "FAILED")
-                        except Exception as e:
-                            logger.error(f"Exception during BUY order placement for row {row.row_index}: {e}")
-                            self.order_manager.mark_cancelled(order_id)
-            else:
-                # Outside window
-                # Cancel any active orders for this row
-                if row.row_index in self.order_manager._row_to_orders:
-                    oids = list(self.order_manager._row_to_orders[row.row_index])
-                    for oid in oids:
-                        logger.info(f"Cancelling order {oid} for row {row.row_index} (outside window)")
-                        await self.broker.cancel_order(oid)
-                        self.order_manager.mark_cancelled(oid)
-
-                # Update status
-                if row.has_y:
-                    new_status = f"OWNED:{owned_id if owned_id else 0}"
-                    if row.status != new_status:
-                        await self.sheet.update_row_status(row.row_index, new_status)
-                else:
-                    if row.status != "IDLE":
-                        await self.sheet.update_row_status(row.row_index, "IDLE")
+                            if row.status != "IDLE":
+                                self._update_row_status_in_memory(row.row_index, "IDLE")
+                except Exception as row_error:
+                    logger.error(f"Error processing row {row.row_index}: {row_error}", exc_info=True)
+        finally:
+            # ALWAYS sync pending updates to sheet, even if something failed
+            await self._sync_to_sheet()
 
         # Update last broker shares at end of tick
         self.last_broker_shares = broker_shares
@@ -447,13 +495,15 @@ class GridEngine:
             row_index, action = self.order_manager.mark_filled(order_id)
 
             if row_index:
-                # Update status in sheet
+                # Update status in sheet via memory-first sync
                 if action == 'BUY':
                     new_status = f"OWNED:{order_id}"
                 else: # SELL
                     new_status = "IDLE"
 
-                asyncio.create_task(self.sheet.update_row_status(row_index, new_status))
+                self._update_row_status_in_memory(row_index, new_status)
+                # Background sync attempt
+                asyncio.create_task(self._sync_to_sheet())
 
                 # Prepare data for sheet logging in Fills tab
                 log_data = {
@@ -463,7 +513,14 @@ class GridEngine:
                     "filled_qty": result.filled_qty,
                     "order_id": order_id
                 }
-                asyncio.create_task(self.sheet.log_fill(log_data))
+
+                async def _log_fill_safe(data):
+                    try:
+                        await self.sheet.log_fill(data)
+                    except Exception as e:
+                        logger.error(f"Background fill logging failed: {e}")
+
+                asyncio.create_task(_log_fill_safe(log_data))
                 logger.info(f"Logged fill for row {row_index}, order {order_id}")
             else:
                 logger.warning(f"Received fill for untracked order {order_id}")
