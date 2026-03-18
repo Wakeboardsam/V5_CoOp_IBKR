@@ -40,7 +40,7 @@ async def test_handle_error_10329(mock_broker, mock_sheet, config):
     })
     mock_sheet.fetch_grid.return_value = grid_state
 
-    # Simulate error 10329
+    # Simulate error 10329 on BUY
     mock_broker.place_limit_order.return_value = OrderResult(
         order_id="ORD-FAILED",
         status="error",
@@ -53,11 +53,36 @@ async def test_handle_error_10329(mock_broker, mock_sheet, config):
     with patch.object(GridState, 'distal_y_row', 7):
         await engine._tick()
 
-    # Should mark as FAILED
-    mock_sheet.update_row_status.assert_called_with(10, "FAILED")
-    # Should NOT be tracking the order (it should have been removed by mark_cancelled/mark_filled or similar)
-    # Actually mark_cancelled is called when status is error
+    # Should revert to IDLE (which it was already, so might not call update if it thinks it's the same,
+    # but engine._update_row_status_in_memory will queue it)
+    mock_sheet.update_row_status.assert_called_with(10, "IDLE")
     assert not engine.order_manager.is_tracked("ORD-FAILED")
+    assert 10 in engine.row_cooldowns
+
+@pytest.mark.asyncio
+async def test_handle_sell_error_preserves_owned(mock_broker, mock_sheet, config):
+    grid_state = GridState(rows={
+        10: GridRow(row_index=10, status="OWNED:999", has_y=True, sell_price=110.0, buy_price=105.0, shares=10)
+    })
+    mock_sheet.fetch_grid.return_value = grid_state
+    mock_broker.get_positions.return_value = {"TQQQ": 10}
+
+    # Simulate error on SELL
+    mock_broker.place_limit_order.return_value = OrderResult(
+        order_id="ORD-SELL-FAILED",
+        status="error",
+        error_code=10329
+    )
+
+    engine = GridEngine(mock_broker, mock_sheet, config)
+    # Row 10 is in window (distal_y=10, window=[7, 13])
+    with patch.object(GridState, 'distal_y_row', 10):
+        await engine._tick()
+
+    # Should revert to OWNED:999 (preserving the historical ID if possible, or OWNED:0)
+    # In our implementation it uses owned_id from the status string if found.
+    mock_sheet.update_row_status.assert_called_with(10, "OWNED:999")
+    assert 10 in engine.row_cooldowns
 
 @pytest.mark.asyncio
 async def test_skip_failed_level(mock_broker, mock_sheet, config):
