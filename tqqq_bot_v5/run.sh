@@ -19,6 +19,7 @@ ReadOnlyApi=no
 OverrideTwsApiPort=${IBKR_PORT}
 AcceptIncomingConnectionAction=accept
 AcceptNonBrokerageAccountWarning=yes
+BypassOrderPrecautions=yes
 EOF
 echo "Starting Xvfb..."
 Xvfb :99 -ac -screen 0 1024x768x16 &
