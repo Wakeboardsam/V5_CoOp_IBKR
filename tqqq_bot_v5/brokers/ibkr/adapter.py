@@ -194,6 +194,7 @@ class IBKRAdapter(BrokerBase):
         order = LimitOrder(action, qty, limit_price)
         order.tif = tif
         order.outsideRth = True
+        order.overridePercentageConstraints = True
 
         if order_id:
             order.orderId = int(order_id)
