@@ -20,7 +20,13 @@ OverrideTwsApiPort=${IBKR_PORT}
 AcceptIncomingConnectionAction=accept
 AcceptNonBrokerageAccountWarning=yes
 BypassOrderPrecautions=yes
+AllowBlindTrading=yes
 EOF
+echo "Injecting API bypass settings directly into jts.ini..."
+mkdir -p /root/Jts
+touch /root/Jts/jts.ini
+grep -q "BypassOrderPrecautions" /root/Jts/jts.ini || echo "BypassOrderPrecautions=true" >> /root/Jts/jts.ini
+grep -q "BypassRedirectOrderWarning" /root/Jts/jts.ini || echo "BypassRedirectOrderWarning=true" >> /root/Jts/jts.ini
 echo "Starting Xvfb..."
 Xvfb :99 -ac -screen 0 1024x768x16 &
 export DISPLAY=:99
