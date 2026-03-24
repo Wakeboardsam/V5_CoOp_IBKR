@@ -20,7 +20,7 @@ async def test_ensure_connected_reconnects_and_awaits():
     adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
     adapter.ib = MagicMock()
 
-    # First call False, second call True
+    # First call False, second call True (Stage 1 reconnect succeeds)
     adapter.is_connected = AsyncMock(side_effect=[False, True])
     adapter.ib.connectAsync = AsyncMock()
 
@@ -28,3 +28,22 @@ async def test_ensure_connected_reconnects_and_awaits():
 
     assert adapter.is_connected.await_count == 2
     adapter.ib.connectAsync.assert_awaited_once()
+    adapter.ib.disconnect.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_ensure_connected_reconnects_stage2():
+    adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
+    adapter.ib = MagicMock()
+
+    # Stage 1 fails (is_connected returns False, False)
+    # Stage 2 succeeds (is_connected returns True)
+    adapter.is_connected = AsyncMock(side_effect=[False, False, True])
+    adapter.ib.connectAsync = AsyncMock()
+
+    # We also mock IB() so when Stage 2 recreates it, it uses our mock
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr('brokers.ibkr.adapter.IB', lambda: adapter.ib)
+        await adapter.ensure_connected()
+
+    assert adapter.is_connected.await_count == 3
+    assert adapter.ib.connectAsync.await_count == 2
