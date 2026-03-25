@@ -1,6 +1,9 @@
 import asyncio
 import logging
 from typing import Optional, Callable
+from datetime import datetime, timedelta
+import os
+import signal
 from ib_insync import IB, Stock, Order, Trade, LimitOrder
 
 from brokers.base import BrokerBase, OrderResult
@@ -19,6 +22,7 @@ class IBKRAdapter(BrokerBase):
         self._on_update_callbacks: dict[str, Callable] = {}
         self._selected_cash_tag: Optional[str] = None
         self._last_error: dict[int, tuple[int, str]] = {}  # reqId -> (errorCode, errorString)
+        self._disconnect_time: Optional[datetime] = None
 
         # Subscribe to order status events
         self.ib.orderStatusEvent += self._on_order_status
@@ -41,32 +45,74 @@ class IBKRAdapter(BrokerBase):
         return self.ib.isConnected()
 
     async def ensure_connected(self):
-        if not await self.is_connected():
-            logger.warning("IBKR disconnected. Watchdog attempting reconnection...")
-            # Implement exponential backoff for reconnection as requested
-            delay = 5
-            max_attempts = 5
-            for attempt in range(1, max_attempts + 1):
-                logger.info(f"Reconnection attempt {attempt}/{max_attempts}...")
-                try:
-                    # Attempt connection with a timeout to avoid hanging indefinitely
-                    await asyncio.wait_for(
-                        self.ib.connectAsync(self.host, self.port, clientId=self.client_id),
-                        timeout=30
-                    )
-                    if await self.is_connected():
-                        logger.info("Watchdog successfully reconnected.")
-                        self.ib.reqMarketDataType(3)
-                        return
-                except Exception as e:
-                    logger.error(f"Reconnection attempt {attempt} failed: {e}")
+        if await self.is_connected():
+            self._disconnect_time = None
+            return
 
-                if attempt < max_attempts:
-                    logger.info(f"Retrying in {delay} seconds...")
-                    await asyncio.sleep(delay)
-                    delay *= 2
+        logger.warning("IBKR disconnected. Watchdog attempting reconnection...")
 
-            raise ConnectionError(f"Watchdog failed to reconnect after {max_attempts} attempts.")
+        if self._disconnect_time is None:
+            self._disconnect_time = datetime.now()
+
+        # Stage 1: Try to reconnect on the existing IB object
+        logger.info("Stage 1: Disconnecting and reconnecting existing IB object...")
+        try:
+            self.ib.disconnect()
+        except Exception as e:
+            logger.debug(f"Error disconnecting existing IB object: {e}")
+
+        await asyncio.sleep(1) # Give socket a moment to clear
+
+        try:
+            await asyncio.wait_for(
+                self.ib.connectAsync(self.host, self.port, clientId=self.client_id),
+                timeout=30
+            )
+            if await self.is_connected():
+                logger.info("Watchdog Stage 1 successfully reconnected.")
+                self.ib.reqMarketDataType(3)
+                self._disconnect_time = None
+                return
+        except Exception as e:
+            logger.error(f"Stage 1 reconnect failed: {e}")
+
+        # Stage 2: Fully recreate the IB object
+        logger.info("Stage 2: Recreating IB object and attempting fresh connection...")
+        try:
+            self.ib.disconnect()
+        except Exception:
+            pass
+
+        self.ib = IB()
+        self.ib.orderStatusEvent += self._on_order_status
+        self.ib.errorEvent += self._on_error
+
+        try:
+            await asyncio.wait_for(
+                self.ib.connectAsync(self.host, self.port, clientId=self.client_id),
+                timeout=30
+            )
+            if await self.is_connected():
+                logger.info("Watchdog Stage 2 successfully reconnected with fresh IB object.")
+                self.ib.reqMarketDataType(3)
+                self._disconnect_time = None
+                return
+        except Exception as e:
+            logger.error(f"Stage 2 reconnect failed: {e}")
+
+        # Stage 3: Check if we have been disconnected for > 15 minutes
+        time_disconnected = datetime.now() - self._disconnect_time
+        if time_disconnected > timedelta(minutes=15):
+            logger.critical("Watchdog: IBKR disconnected for > 15 minutes. Triggering full container restart via SIGTERM to PID 1.")
+            try:
+                # PID 1 is usually supervisord or the init process in Docker
+                os.kill(1, signal.SIGTERM)
+            except Exception as e:
+                logger.error(f"Failed to send SIGTERM to PID 1: {e}")
+            raise ConnectionError("Watchdog triggered container restart after 15 minutes of downtime.")
+        else:
+            logger.warning(f"Watchdog reconnect failed. Disconnected for {time_disconnected}. Will try again on next engine tick.")
+            raise ConnectionError("Watchdog failed to reconnect during this tick.")
 
     async def get_price(self, ticker: str) -> float:
         from brokers.ibkr.order_builder import get_dynamic_exchange
