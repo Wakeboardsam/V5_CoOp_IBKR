@@ -68,3 +68,6 @@ class BrokerBase(ABC):
 
     @abstractmethod
     async def get_positions(self) -> dict[str, int]: ...
+
+    @abstractmethod
+    async def get_portfolio_item(self, ticker: str) -> Optional[dict]: ...

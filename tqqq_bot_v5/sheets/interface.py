@@ -168,13 +168,17 @@ class SheetInterface:
     async def log_health(self, health_data: dict) -> bool:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # TIMESTAMP, LAST_PRICE, OPEN_ORDERS_COUNT, LAST_FILL_TIME, STATUS
+        # TIMESTAMP, LAST_PRICE, OPEN_ORDERS_COUNT, LAST_FILL_TIME, STATUS, POSITION, MARKET_PRICE, MARKET_VALUE, AVG_COST
         row = [
             timestamp,
             health_data.get("last_price"),
             health_data.get("open_orders_count"),
             health_data.get("last_fill_time"),
-            health_data.get("status")
+            health_data.get("status"),
+            health_data.get("position"),
+            health_data.get("market_price"),
+            health_data.get("market_value"),
+            health_data.get("avg_cost")
         ]
 
         try:

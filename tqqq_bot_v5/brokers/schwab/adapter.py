@@ -55,3 +55,6 @@ class SchwabAdapter(BrokerBase):
 
     async def get_positions(self) -> dict[str, int]:
         raise NotImplementedError
+
+    async def get_portfolio_item(self, ticker: str) -> Optional[dict]:
+        raise NotImplementedError

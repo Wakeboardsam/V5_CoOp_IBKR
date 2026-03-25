@@ -144,11 +144,16 @@ class GridEngine:
         while not self._shutdown_event.is_set():
             try:
                 open_orders = await self.broker.get_open_orders()
+                portfolio_item = await self.broker.get_portfolio_item(TICKER)
                 health_data = {
                     "last_price": self.last_price,
                     "open_orders_count": len(open_orders),
                     "last_fill_time": self.last_fill_time.strftime("%Y-%m-%d %H:%M:%S") if self.last_fill_time else "Never",
-                    "status": "Running"
+                    "status": "Running",
+                    "position": portfolio_item.get('position') if portfolio_item else 0,
+                    "market_price": portfolio_item.get('marketPrice') if portfolio_item else 0,
+                    "market_value": portfolio_item.get('marketValue') if portfolio_item else 0,
+                    "avg_cost": portfolio_item.get('averageCost') if portfolio_item else 0
                 }
                 success = await self.sheet.log_health(health_data)
                 if success:
