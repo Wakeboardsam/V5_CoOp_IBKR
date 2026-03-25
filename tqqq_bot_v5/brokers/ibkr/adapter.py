@@ -352,6 +352,21 @@ class IBKRAdapter(BrokerBase):
             positions[pos.contract.symbol] = int(pos.position)
         return positions
 
+    async def get_portfolio_item(self, ticker: str) -> Optional[dict]:
+        """
+        Returns a dictionary containing portfolio details for the ticker:
+        position, marketPrice, marketValue, averageCost.
+        """
+        for item in self.ib.portfolio():
+            if item.contract.symbol == ticker:
+                return {
+                    'position': item.position,
+                    'marketPrice': item.marketPrice,
+                    'marketValue': item.marketValue,
+                    'averageCost': item.averageCost
+                }
+        return None
+
     def _on_order_status(self, trade: Trade):
         status = trade.orderStatus.status
         order_id = str(trade.order.orderId)
