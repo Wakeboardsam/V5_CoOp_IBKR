@@ -1,5 +1,5 @@
 from typing import Optional, Callable
-from brokers.base import BrokerBase, OrderResult
+from brokers.base import BrokerBase, OrderResult, PositionSnapshot
 
 
 class SchwabAdapter(BrokerBase):
@@ -54,6 +54,9 @@ class SchwabAdapter(BrokerBase):
         raise NotImplementedError
 
     async def get_positions(self) -> dict[str, int]:
+        raise NotImplementedError
+
+    async def get_position_snapshot(self) -> PositionSnapshot:
         raise NotImplementedError
 
     async def get_portfolio_item(self, ticker: str) -> Optional[dict]:

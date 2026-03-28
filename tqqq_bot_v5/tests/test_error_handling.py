@@ -1,3 +1,4 @@
+from brokers.base import PositionSnapshot
 import pytest
 from unittest.mock import AsyncMock, patch
 from engine.engine import GridEngine
@@ -13,7 +14,8 @@ def mock_broker():
     broker.ensure_connected = AsyncMock()
     broker.get_bid_ask = AsyncMock(return_value=(99.95, 100.05))
     broker.get_open_orders = AsyncMock(return_value=[])
-    broker.get_positions = AsyncMock(return_value={"TQQQ": 0})
+    from brokers.base import PositionSnapshot
+    broker.get_position_snapshot = AsyncMock(return_value=PositionSnapshot(is_ready=True, positions={"TQQQ": 0}))
     broker.get_next_order_id = AsyncMock(return_value="ORD-FAILED")
     return broker
 
@@ -65,7 +67,7 @@ async def test_handle_sell_error_preserves_owned(mock_broker, mock_sheet, config
         10: GridRow(row_index=10, status="OWNED:999", has_y=True, sell_price=110.0, buy_price=105.0, shares=10)
     })
     mock_sheet.fetch_grid.return_value = grid_state
-    mock_broker.get_positions.return_value = {"TQQQ": 10}
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 10})
 
     # Simulate error on SELL
     mock_broker.place_limit_order.return_value = OrderResult(

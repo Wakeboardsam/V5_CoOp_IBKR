@@ -4,6 +4,12 @@ from typing import Optional, Callable
 
 
 @dataclass
+class PositionSnapshot:
+    is_ready: bool
+    positions: dict[str, int]
+
+
+@dataclass
 class OrderResult:
     order_id: str
     status: str          # 'submitted' | 'filled' | 'cancelled' | 'error'
@@ -68,6 +74,9 @@ class BrokerBase(ABC):
 
     @abstractmethod
     async def get_positions(self) -> dict[str, int]: ...
+
+    @abstractmethod
+    async def get_position_snapshot(self) -> PositionSnapshot: ...
 
     @abstractmethod
     async def get_portfolio_item(self, ticker: str) -> Optional[dict]: ...

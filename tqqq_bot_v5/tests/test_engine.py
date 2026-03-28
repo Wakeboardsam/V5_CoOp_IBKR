@@ -1,3 +1,4 @@
+from brokers.base import PositionSnapshot
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -20,7 +21,8 @@ def mock_broker():
     broker.place_bracket_order = AsyncMock(return_value=OrderResult(order_id="ORD-P|ORD-T", status="submitted"))
     broker.place_limit_order = AsyncMock(return_value=OrderResult(order_id="ORD-123", status="submitted"))
     broker.get_open_orders = AsyncMock(return_value=[])
-    broker.get_positions = AsyncMock(return_value={"TQQQ": 10})
+    from brokers.base import PositionSnapshot
+    broker.get_position_snapshot = AsyncMock(return_value=PositionSnapshot(is_ready=True, positions={"TQQQ": 10}))
     broker.subscribe_to_updates = MagicMock()
     broker.get_next_order_id = AsyncMock(return_value="ORD-123")
     return broker
@@ -57,7 +59,7 @@ async def test_engine_places_sell_and_buy_limits(mock_broker, mock_sheet, config
     # Row 7 is has_y -> should place SELL.
     # Row 8 is NOT has_y and 8 > 7 -> should place BUY.
 
-    mock_broker.get_positions.return_value = {"TQQQ": 10} # Matches Row 7 shares
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 10}) # Matches Row 7 shares
     mock_broker.get_wallet_balance.return_value = 50000.0
 
     await engine._tick()
@@ -83,7 +85,7 @@ async def test_engine_places_sell_and_buy_limits(mock_broker, mock_sheet, config
 @pytest.mark.asyncio
 async def test_circuit_breaker_halts(mock_broker, mock_sheet, config):
     engine = GridEngine(mock_broker, mock_sheet, config)
-    mock_broker.get_positions.return_value = {"TQQQ": 500} # Mismatch (should be 10)
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 500}) # Mismatch (should be 10)
 
     await engine._tick()
 
@@ -101,7 +103,7 @@ async def test_retrack_from_status(mock_broker, mock_sheet, config):
         }
     )
     mock_sheet.fetch_grid.return_value = grid_state
-    mock_broker.get_positions.return_value = {"TQQQ": 10}
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 10})
     mock_broker.get_open_orders.return_value = [{'order_id': 'ORD-EXISTING', 'limit_price': 105.0, 'qty': 10, 'action': 'BUY'}]
 
     engine = GridEngine(mock_broker, mock_sheet, config)
@@ -115,7 +117,7 @@ async def test_retrack_from_status(mock_broker, mock_sheet, config):
 @pytest.mark.asyncio
 async def test_share_mismatch_warn(mock_broker, mock_sheet, config):
     config.share_mismatch_mode = "warn"
-    mock_broker.get_positions.return_value = {"TQQQ": 500} # Mismatch
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 500}) # Mismatch
     mock_broker.get_price.return_value = 100.0
     engine = GridEngine(mock_broker, mock_sheet, config)
 
@@ -156,7 +158,7 @@ async def test_anchor_acquisition(mock_broker, mock_sheet, config):
         }
     )
     mock_sheet.fetch_grid.return_value = grid_state
-    mock_broker.get_positions.return_value = {"TQQQ": 0}
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 0})
     mock_broker.get_wallet_balance.return_value = 50000.0
     mock_broker.get_bid_ask.return_value = (99.9, 100.0)
     config.anchor_buy_offset = 0.05
@@ -182,7 +184,7 @@ async def test_no_anchor_write_if_owned(mock_broker, mock_sheet, config):
         }
     )
     mock_sheet.fetch_grid.return_value = grid_state
-    mock_broker.get_positions.return_value = {"TQQQ": 10}
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 10})
     mock_broker.get_wallet_balance.return_value = 50000.0
 
     engine = GridEngine(mock_broker, mock_sheet, config)
@@ -259,7 +261,7 @@ async def test_anchor_update_on_full_sell_cycle(mock_broker, mock_sheet, config)
         }
     )
     mock_sheet.fetch_grid.return_value = grid_state
-    mock_broker.get_positions.return_value = {"TQQQ": 10}
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 10})
     mock_broker.get_wallet_balance.return_value = 50000.0
     mock_broker.get_bid_ask.return_value = (100.0, 101.0)
 
@@ -267,7 +269,7 @@ async def test_anchor_update_on_full_sell_cycle(mock_broker, mock_sheet, config)
     engine.last_broker_shares = 10
 
     # Tick where shares become 0
-    mock_broker.get_positions.return_value = {"TQQQ": 0}
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 0})
     # Need to update grid state so CB doesn't trip if we don't care about it here
     # but _tick fetch_grid happens before CB.
     grid_state.rows[7].has_y = False
@@ -306,7 +308,7 @@ async def test_no_anchor_write_if_already_working(mock_broker, mock_sheet, confi
         }
     )
     mock_sheet.fetch_grid.return_value = grid_state
-    mock_broker.get_positions.return_value = {"TQQQ": 0}
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 0})
     mock_broker.get_wallet_balance.return_value = 50000.0
     mock_broker.get_open_orders.return_value = [{'order_id': 'ORD-1', 'limit_price': 100.0, 'qty': 10, 'action': 'BUY'}]
 
