@@ -6,7 +6,7 @@ import os
 import signal
 from ib_insync import IB, Stock, Order, Trade, LimitOrder
 
-from brokers.base import BrokerBase, OrderResult
+from brokers.base import BrokerBase, OrderResult, PositionSnapshot
 from brokers.ibkr.connection import async_connect
 from brokers.ibkr.order_builder import build_bracket_order
 
@@ -23,6 +23,7 @@ class IBKRAdapter(BrokerBase):
         self._selected_cash_tag: Optional[str] = None
         self._last_error: dict[int, tuple[int, str]] = {}  # reqId -> (errorCode, errorString)
         self._disconnect_time: Optional[datetime] = None
+        self._broker_state_ready = False
 
         # Subscribe to order status events
         self.ib.orderStatusEvent += self._on_order_status
@@ -33,12 +34,14 @@ class IBKRAdapter(BrokerBase):
         self._last_error[reqId] = (errorCode, errorString)
 
     async def connect(self) -> bool:
+        self._broker_state_ready = False
         connected = await async_connect(self.ib, self.host, self.port, self.client_id)
         if connected:
             self.ib.reqMarketDataType(3)
         return connected
 
     async def disconnect(self):
+        self._broker_state_ready = False
         self.ib.disconnect()
 
     async def is_connected(self) -> bool:
@@ -49,6 +52,7 @@ class IBKRAdapter(BrokerBase):
             self._disconnect_time = None
             return
 
+        self._broker_state_ready = False
         logger.warning("IBKR disconnected. Watchdog attempting reconnection...")
 
         if self._disconnect_time is None:
@@ -60,6 +64,12 @@ class IBKRAdapter(BrokerBase):
             self.ib.disconnect()
         except Exception as e:
             logger.debug(f"Error disconnecting existing IB object: {e}")
+
+        # Clear cached state on the wrapper so we don't prematurely trigger readiness
+        # based on stale values surviving the disconnect
+        self.ib.wrapper.accountValues.clear()
+        self.ib.wrapper.positions.clear()
+        self.ib.wrapper.portfolio.clear()
 
         await asyncio.sleep(1) # Give socket a moment to clear
 
@@ -84,6 +94,7 @@ class IBKRAdapter(BrokerBase):
             pass
 
         self.ib = IB()
+        self._broker_state_ready = False
         self.ib.orderStatusEvent += self._on_order_status
         self.ib.errorEvent += self._on_error
 
@@ -351,6 +362,18 @@ class IBKRAdapter(BrokerBase):
         for pos in self.ib.positions():
             positions[pos.contract.symbol] = int(pos.position)
         return positions
+
+    async def get_position_snapshot(self) -> PositionSnapshot:
+        if not self._broker_state_ready:
+            # Heuristic: accountValues() is almost always populated immediately upon account sync
+            if self.ib.accountValues():
+                self._broker_state_ready = True
+                logger.info("Broker state transitioned to READY (accountValues populated).")
+            else:
+                return PositionSnapshot(is_ready=False, positions={})
+
+        positions = await self.get_positions()
+        return PositionSnapshot(is_ready=True, positions=positions)
 
     async def get_portfolio_item(self, ticker: str) -> Optional[dict]:
         """

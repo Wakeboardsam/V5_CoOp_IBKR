@@ -333,7 +333,12 @@ class GridEngine:
                     row.has_y = pending_status.startswith("OWNED:") or pending_status.startswith("WORKING_SELL:")
 
         # 2. Circuit Breaker
-        positions = await self.broker.get_positions()
+        snapshot = await self.broker.get_position_snapshot()
+        if not snapshot.is_ready:
+            logger.warning("Broker state is UNKNOWN. Skipping circuit breaker and trading for this tick.")
+            return
+
+        positions = snapshot.positions
         broker_shares = positions.get(TICKER, 0)
 
         # Bug 1 Fix: Write G7 only after a full sell cycle complete

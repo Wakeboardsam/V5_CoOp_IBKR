@@ -1,3 +1,4 @@
+from brokers.base import PositionSnapshot
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -17,7 +18,8 @@ def mock_broker():
     broker.get_bid_ask = AsyncMock(return_value=(99.95, 100.05))
     broker.place_limit_order = AsyncMock(return_value=OrderResult(order_id="ORD-123", status="submitted"))
     broker.get_open_orders = AsyncMock(return_value=[])
-    broker.get_positions = AsyncMock(return_value={"TQQQ": 0})
+    from brokers.base import PositionSnapshot
+    broker.get_position_snapshot = AsyncMock(return_value=PositionSnapshot(is_ready=True, positions={"TQQQ": 0}))
     broker.subscribe_to_updates = MagicMock()
     broker.cancel_order = AsyncMock(return_value=True)
     broker.get_next_order_id = AsyncMock(return_value="ORD-123")
@@ -78,7 +80,7 @@ async def test_transition_owned_to_working_sell(mock_broker, mock_sheet, config)
         10: GridRow(row_index=10, status="OWNED:BUY-123", has_y=True, sell_price=110.0, buy_price=105.0, shares=10)
     })
     mock_sheet.fetch_grid.return_value = grid_state
-    mock_broker.get_positions.return_value = {"TQQQ": 10}
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 10})
     mock_broker.place_limit_order.return_value = OrderResult(order_id="SELL-456", status="submitted")
 
     engine = GridEngine(mock_broker, mock_sheet, config)
@@ -128,7 +130,7 @@ async def test_cancel_outside_window_working_sell(mock_broker, mock_sheet, confi
         7: GridRow(row_index=7, status="WORKING_SELL:SELL-456|OWNED:BUY-123", has_y=True, sell_price=105.0, buy_price=100.0, shares=10)
     })
     mock_sheet.fetch_grid.return_value = grid_state
-    mock_broker.get_positions.return_value = {"TQQQ": 10}
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 10})
     mock_broker.get_open_orders.return_value = [{'order_id': 'SELL-456', 'action': 'SELL'}]
 
     engine = GridEngine(mock_broker, mock_sheet, config)
@@ -147,7 +149,7 @@ async def test_owned_fallback_enforcement(mock_broker, mock_sheet, config):
         7: GridRow(row_index=7, status="WORKING_SELL:SELL-456", has_y=True, sell_price=105.0, buy_price=100.0, shares=10)
     })
     mock_sheet.fetch_grid.return_value = grid_state
-    mock_broker.get_positions.return_value = {"TQQQ": 10}
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 10})
     mock_broker.get_open_orders.return_value = [{'order_id': 'SELL-456', 'action': 'SELL'}]
 
     engine = GridEngine(mock_broker, mock_sheet, config)
@@ -167,7 +169,7 @@ async def test_retrack_parsing(mock_broker, mock_sheet, config):
         7: GridRow(row_index=7, status="WORKING_SELL:SELL-123|OWNED:BUY-789", has_y=True, sell_price=105.0, buy_price=100.0, shares=10)
     })
     mock_sheet.fetch_grid.return_value = grid_state
-    mock_broker.get_positions.return_value = {"TQQQ": 10}
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 10})
     mock_broker.get_open_orders.return_value = [{'order_id': 'SELL-123', 'action': 'SELL'}]
 
     engine = GridEngine(mock_broker, mock_sheet, config)

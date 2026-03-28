@@ -1,3 +1,4 @@
+from brokers.base import PositionSnapshot
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
@@ -19,7 +20,8 @@ def mock_broker():
     broker.get_bid_ask = AsyncMock(return_value=(99.95, 100.05))
     broker.place_limit_order = AsyncMock(return_value=OrderResult(order_id="ORD-NEW", status="submitted"))
     broker.get_open_orders = AsyncMock(return_value=[])
-    broker.get_positions = AsyncMock(return_value={"TQQQ": 0})
+    from brokers.base import PositionSnapshot
+    broker.get_position_snapshot = AsyncMock(return_value=PositionSnapshot(is_ready=True, positions={"TQQQ": 0}))
     broker.subscribe_to_updates = MagicMock()
     broker.get_next_order_id = AsyncMock(return_value="ORD-NEW")
     return broker
@@ -53,7 +55,7 @@ def config():
 async def test_share_mismatch_halt(mock_broker, mock_sheet, config):
     config.share_mismatch_mode = "halt"
     # Sheet says 10 shares (row 7), Broker says 0.
-    mock_broker.get_positions.return_value = {"TQQQ": 0}
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 0})
 
     engine = GridEngine(mock_broker, mock_sheet, config)
     await engine._tick()
@@ -68,7 +70,7 @@ async def test_share_mismatch_halt(mock_broker, mock_sheet, config):
 async def test_share_mismatch_warn(mock_broker, mock_sheet, config):
     config.share_mismatch_mode = "warn"
     # Sheet says 10 shares (row 7), Broker says 0. Mismatch!
-    mock_broker.get_positions.return_value = {"TQQQ": 0}
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 0})
 
     engine = GridEngine(mock_broker, mock_sheet, config)
     await engine._tick()
@@ -92,7 +94,7 @@ async def test_share_mismatch_warn(mock_broker, mock_sheet, config):
 @pytest.mark.asyncio
 async def test_share_mismatch_warn_retracking(mock_broker, mock_sheet, config):
     config.share_mismatch_mode = "warn"
-    mock_broker.get_positions.return_value = {"TQQQ": 0} # Mismatch
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 0}) # Mismatch
 
     # Existing order in status
     grid_state = GridState(
@@ -114,7 +116,7 @@ async def test_share_mismatch_warn_retracking(mock_broker, mock_sheet, config):
 @pytest.mark.asyncio
 async def test_share_mismatch_warn_outside_window(mock_broker, mock_sheet, config):
     config.share_mismatch_mode = "warn"
-    mock_broker.get_positions.return_value = {"TQQQ": 0} # Mismatch
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 0}) # Mismatch
 
     # distal_y is 7. Window is [7, 10].
     # Let's put a row outside the window.
@@ -139,7 +141,7 @@ async def test_share_mismatch_warn_outside_window(mock_broker, mock_sheet, confi
 @pytest.mark.asyncio
 async def test_share_mismatch_warn_log_error_fails(mock_broker, mock_sheet, config):
     config.share_mismatch_mode = "warn"
-    mock_broker.get_positions.return_value = {"TQQQ": 0} # Mismatch
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 0}) # Mismatch
     # Simulate log_error raising an exception
     mock_sheet.log_error.side_effect = Exception("API Failure")
 
