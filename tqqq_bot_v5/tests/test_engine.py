@@ -319,3 +319,45 @@ async def test_no_anchor_write_if_already_working(mock_broker, mock_sheet, confi
     mock_sheet.write_anchor_ask.assert_not_called()
     # Should NOT place a new order
     assert mock_broker.place_limit_order.call_count == 0
+
+@pytest.mark.asyncio
+async def test_engine_tick_unknown_state_returns_early():
+    """
+    Tests that the engine completely skips the circuit breaker and
+    does not interact with the sheet or place orders when the
+    broker state is UNKNOWN.
+    """
+    from engine.engine import GridEngine
+    from config.schema import AppConfig
+    from brokers.base import PositionSnapshot
+
+    mock_broker = AsyncMock()
+    # Mock UNKNOWN state
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=False, positions={})
+    mock_broker.get_wallet_balance.return_value = 1000.0
+    mock_broker.get_price.return_value = 100.0
+
+    mock_sheet = AsyncMock()
+
+    from engine.grid_state import GridState
+    grid = GridState(rows={})
+    # distal_y_row is computed property
+    mock_sheet.fetch_grid.return_value = grid
+
+    config = AppConfig(
+        google_sheet_id="fake",
+        google_credentials_json="{}",
+        poll_interval_seconds=1,
+        heartbeat_interval_seconds=1,
+        health_log_interval_seconds=1
+    )
+    engine = GridEngine(broker=mock_broker, sheet=mock_sheet, config=config)
+
+    await engine._tick()
+
+    # The grid state should be fetched (step 1), but then the snapshot check happens.
+    # It should log a warning and return BEFORE fetching open orders or checking mismatch.
+    mock_sheet.fetch_grid.assert_called_once()
+    mock_broker.get_open_orders.assert_not_called()
+    mock_sheet.log_error.assert_not_called()
+    mock_broker.place_limit_order.assert_not_called()

@@ -65,6 +65,12 @@ class IBKRAdapter(BrokerBase):
         except Exception as e:
             logger.debug(f"Error disconnecting existing IB object: {e}")
 
+        # Clear cached state on the wrapper so we don't prematurely trigger readiness
+        # based on stale values surviving the disconnect
+        self.ib.wrapper.accountValues.clear()
+        self.ib.wrapper.positions.clear()
+        self.ib.wrapper.portfolio.clear()
+
         await asyncio.sleep(1) # Give socket a moment to clear
 
         try:

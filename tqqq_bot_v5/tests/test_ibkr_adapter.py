@@ -349,3 +349,42 @@ async def test_get_bid_ask_fallback(mock_ib):
         bid, ask = await adapter.get_bid_ask('TQQQ')
         assert bid == 50.5
         assert ask == 50.5
+
+@pytest.mark.asyncio
+async def test_ibkr_reconnect_clears_state_and_readiness():
+    adapter = IBKRAdapter("127.0.0.1", 7497, 1, False)
+    # Simulate being connected and READY
+    adapter.ib.isConnected = MagicMock(return_value=True)
+    adapter._broker_state_ready = True
+
+    # Mock account values with some dummy data to simulate being ready
+    from ib_insync import AccountValue
+    dummy_val = AccountValue(account='dummy', tag='dummy', value='dummy', currency='dummy', modelCode='dummy')
+    # Using tuple of attributes as key per ib_insync wrapper implementation, or just any key to prove it clears
+    adapter.ib.wrapper.accountValues[('dummy', 'dummy', 'dummy', 'dummy')] = dummy_val
+
+    # Simulate a disconnect happening
+    adapter.ib.isConnected = MagicMock(return_value=False)
+
+    # Mock connectAsync for Stage 1 reconnect
+    adapter.ib.connectAsync = AsyncMock()
+    # Mock reqMarketDataType
+    adapter.ib.reqMarketDataType = MagicMock()
+
+    # During Stage 1, it calls isConnected to verify. We'll make it return True
+    # AFTER the reconnect attempt.
+    adapter.ib.isConnected.side_effect = [False, True]
+
+    # Call ensure_connected which triggers Stage 1
+    await adapter.ensure_connected()
+
+    # Readiness should be explicitly reset to False
+    assert adapter._broker_state_ready is False
+
+    # The wrapper's cached accountValues should be cleared so they don't immediately
+    # flip readiness back to True
+    assert len(adapter.ib.wrapper.accountValues) == 0
+
+    # Test that get_position_snapshot now correctly returns is_ready=False
+    snapshot = await adapter.get_position_snapshot()
+    assert snapshot.is_ready is False
