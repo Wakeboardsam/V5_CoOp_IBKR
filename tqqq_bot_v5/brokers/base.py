@@ -44,6 +44,9 @@ class BrokerBase(ABC):
     async def get_wallet_balance(self) -> float: ...
 
     @abstractmethod
+    async def get_net_liquidation_value(self) -> Optional[float]: ...
+
+    @abstractmethod
     async def get_next_order_id(self) -> str: ...
 
     @abstractmethod

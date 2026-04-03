@@ -234,6 +234,35 @@ class IBKRAdapter(BrokerBase):
             logger.error(f"Error fetching balance: {e}")
             return 0.0
 
+    async def get_net_liquidation_value(self) -> Optional[float]:
+        """
+        Returns Net Liquidation Value (NLV).
+
+        Implementation detail:
+        - Reads the 'NetLiquidation' tag from ib_insync's accountValues().
+        - Prefers USD if present; otherwise falls back to BASE/blank currency or the first match.
+        """
+        try:
+            account_values = self.ib.accountValues()
+            if not account_values:
+                logger.error("API call returned empty \u2014 possible Gateway auth or subscription issue")
+                return None
+
+            netliq_values = [v for v in account_values if getattr(v, "tag", None) == "NetLiquidation"]
+            if not netliq_values:
+                logger.warning("NetLiquidation not found in accountValues()")
+                return None
+
+            preferred = next((v for v in netliq_values if getattr(v, "currency", None) == "USD"), None)
+            if preferred is None:
+                preferred = next((v for v in netliq_values if getattr(v, "currency", None) in ("BASE", "")), None) or netliq_values[0]
+
+            return float(preferred.value)
+
+        except Exception as e:
+            logger.error(f"Error fetching NetLiquidation: {e}")
+            return None
+
     async def place_limit_order(
         self, ticker: str, action: str,
         qty: int, limit_price: float,

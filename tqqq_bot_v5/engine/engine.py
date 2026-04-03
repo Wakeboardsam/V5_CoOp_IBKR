@@ -145,6 +145,14 @@ class GridEngine:
             try:
                 open_orders = await self.broker.get_open_orders()
                 portfolio_item = await self.broker.get_portfolio_item(TICKER)
+
+                # Best-effort: do not fail the entire health log if NLV retrieval fails
+                net_liq = None
+                try:
+                    net_liq = await self.broker.get_net_liquidation_value()
+                except Exception as e:
+                    logger.warning(f"Failed to fetch net liquidation value: {e}")
+
                 health_data = {
                     "last_price": self.last_price,
                     "open_orders_count": len(open_orders),
@@ -153,7 +161,8 @@ class GridEngine:
                     "position": portfolio_item.get('position') if portfolio_item else 0,
                     "market_price": portfolio_item.get('marketPrice') if portfolio_item else 0,
                     "market_value": portfolio_item.get('marketValue') if portfolio_item else 0,
-                    "avg_cost": portfolio_item.get('averageCost') if portfolio_item else 0
+                    "avg_cost": portfolio_item.get('averageCost') if portfolio_item else 0,
+                    "net_liquidation_value": net_liq
                 }
                 success = await self.sheet.log_health(health_data)
                 if success:

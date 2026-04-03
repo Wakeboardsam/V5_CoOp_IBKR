@@ -15,6 +15,7 @@ An automated grid trading bot for TQQQ, designed for 24/7 unattended operation w
 2.  **Configuration**:
     *   Create a file named `options.json` (or use the Home Assistant Addon configuration).
     *   Populate it with your broker details, Google Sheet ID, and the content of your Service Account JSON.
+    *   **Security Best Practice:** Ensure `options.json` is never committed to Git. In production or containerized deployments, use a secret manager, mount secrets as volumes, or utilize Home Assistant's built-in secrets handling.
 
 3.  **Broker Setup (IBKR)**:
     *   Ensure IB Gateway or TWS is running and the API is enabled.
@@ -60,7 +61,9 @@ Columns: `TIMESTAMP`, `ROW_ID`, `TYPE`, `FILLED_PRICE`, `FILLED_QTY`, `ORDER_ID`
 
 ### `Health` Tab (Append Only)
 Logs periodic health snapshots.
-Columns: `TIMESTAMP`, `LAST_PRICE`, `OPEN_ORDERS_COUNT`, `LAST_FILL_TIME`, `STATUS`.
+Columns **A:J**: `TIMESTAMP`, `LAST_PRICE`, `OPEN_ORDERS_COUNT`, `LAST_FILL_TIME`, `STATUS`, `POSITION`, `MARKET_PRICE`, `MARKET_VALUE`, `AVG_COST`, `NET_LIQUIDATION_VALUE`.
+
+*Note: `NET_LIQUIDATION_VALUE` is read from IBKR account values (`NetLiquidation`, preferred `USD`).*
 
 ### `Errors` Tab (Append Only)
 Logs runtime errors and circuit breaker events.
