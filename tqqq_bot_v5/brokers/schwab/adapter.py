@@ -24,6 +24,9 @@ class SchwabAdapter(BrokerBase):
     async def get_wallet_balance(self) -> float:
         raise NotImplementedError
 
+    async def get_net_liquidation_value(self) -> Optional[float]:
+        raise NotImplementedError
+
     async def get_next_order_id(self) -> str:
         raise NotImplementedError
 

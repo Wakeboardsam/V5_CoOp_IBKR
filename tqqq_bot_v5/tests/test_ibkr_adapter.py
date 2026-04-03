@@ -168,6 +168,26 @@ async def test_get_price_fallbacks(mock_ib):
     price = await adapter.get_price('TQQQ')
     assert price == 51.0
 
+@pytest.mark.asyncio
+async def test_get_net_liquidation_value_prefers_usd(mock_ib):
+    adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
+    adapter.ib = mock_ib
+
+    v_base = MagicMock(tag='NetLiquidation', value='900.0', currency='BASE')
+    v_usd = MagicMock(tag='NetLiquidation', value='1000.0', currency='USD')
+    mock_ib.accountValues.return_value = [v_base, v_usd]
+
+    nlv = await adapter.get_net_liquidation_value()
+    assert nlv == 1000.0
+
+@pytest.mark.asyncio
+async def test_get_net_liquidation_value_empty(mock_ib):
+    adapter = IBKRAdapter(host='localhost', port=7497, client_id=1, paper=True)
+    adapter.ib = mock_ib
+    mock_ib.accountValues.return_value = []
+
+    nlv = await adapter.get_net_liquidation_value()
+    assert nlv is None
 
 @pytest.mark.asyncio
 async def test_get_wallet_balance_selection_settled(mock_ib):

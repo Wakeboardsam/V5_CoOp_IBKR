@@ -170,3 +170,33 @@ class TestSheetInterface(unittest.IsolatedAsyncioTestCase):
 
             self.assertFalse(result)
             mock_logger.error.assert_any_call("Worksheet 'Errors' not found in the spreadsheet.")
+
+    async def test_log_health_appends_net_liquidation_value(self):
+        mock_worksheet = MagicMock()
+        # Non-empty sheet so headers aren't appended here
+        mock_worksheet.get_values.return_value = [["Header"]]
+        # Optional: present headers so any header checks don't try to expand
+        mock_worksheet.row_values.return_value = [
+            "TIMESTAMP", "LAST_PRICE", "OPEN_ORDERS_COUNT", "LAST_FILL_TIME", "STATUS",
+            "POSITION", "MARKET_PRICE", "MARKET_VALUE", "AVG_COST", "NET_LIQUIDATION_VALUE"
+        ]
+        self.mock_sheet.worksheet.return_value = mock_worksheet
+
+        health_data = {
+            "last_price": 100.0,
+            "open_orders_count": 3,
+            "last_fill_time": "Never",
+            "status": "Running",
+            "position": 10,
+            "market_price": 101.0,
+            "market_value": 1010.0,
+            "avg_cost": 99.0,
+            "net_liquidation_value": 12345.67,
+        }
+
+        result = await self.interface.log_health(health_data)
+        self.assertTrue(result)
+
+        args = mock_worksheet.append_row.call_args[0][0]
+        self.assertEqual(len(args), 10)
+        self.assertEqual(args[-1], 12345.67)
