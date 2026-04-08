@@ -50,18 +50,19 @@ class GridEngine:
 
         await self.broker.connect()
 
+        # Initialize Fills tracking early so we don't miss executions during startup
+        await self.sheet.load_recent_exec_ids(limit=50)
+        await self.sheet.start_fill_worker()
+        self.broker.subscribe_to_executions(self._handle_execution)
+
         # Wait for a valid price before starting anything else
         await self._wait_for_initial_price()
 
         if self._shutdown_event.is_set():
             logger.critical("Engine shutdown initiated during startup. Aborting run.")
+            await self.sheet.stop_fill_worker()
             await self.broker.disconnect()
             return
-
-        # Initialize Fills tracking
-        await self.sheet.load_recent_exec_ids(limit=50)
-        await self.sheet.start_fill_worker()
-        self.broker.subscribe_to_executions(self._handle_execution)
 
         # Start periodic tasks
         health_task = asyncio.create_task(self._log_health_periodic())
@@ -558,7 +559,7 @@ class GridEngine:
             self.last_fill_time = datetime.now()
             row_index, action = self.order_manager.mark_filled(order_id)
 
-            if row_index:
+            if row_index is not None:
                 # Update status in sheet via memory-first sync
                 if action == 'BUY':
                     new_status = f"OWNED:{order_id}"

@@ -250,8 +250,10 @@ class SheetInterface:
             self._worker_task = asyncio.create_task(self._process_fill_queue())
 
     async def stop_fill_worker(self):
-        """Stops the background worker."""
+        """Stops the background worker after draining the queue."""
         if self._worker_task and not self._worker_task.done():
+            # Wait for all queued items to be processed
+            await self._fill_queue.join()
             self._worker_task.cancel()
             try:
                 await self._worker_task
