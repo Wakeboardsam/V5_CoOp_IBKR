@@ -70,6 +70,9 @@ class BrokerBase(ABC):
     def subscribe_to_updates(self, order_id: str, on_update: Callable): ...
 
     @abstractmethod
+    def subscribe_to_executions(self, on_execution: Callable): ...
+
+    @abstractmethod
     async def cancel_order(self, order_id: str) -> bool: ...
 
     @abstractmethod

@@ -114,26 +114,26 @@ class TestSheetInterface(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Use append_row", str(cm.exception))
 
     async def test_log_fill_success(self):
-        mock_worksheet = MagicMock()
-        mock_worksheet.get_values.return_value = [["Header"]] # Not empty
-        self.mock_sheet.worksheet.return_value = mock_worksheet
-
+        # Now log_fill just puts it in the queue
         fill_data = {
+            "exec_id": "EXEC1",
             "row_id": "7",
             "type": "BUY",
             "filled_price": 99.5,
             "filled_qty": 10,
-            "order_id": "ORDER-123"
+            "order_id": "ORDER-123",
+            "perm_id": "PERM1",
+            "symbol": "TQQQ"
         }
 
         result = await self.interface.log_fill(fill_data)
-
         self.assertTrue(result)
-        mock_worksheet.append_row.assert_called_once()
-        # Verify first value is timestamp, others match fill_data
-        args = mock_worksheet.append_row.call_args[0][0]
-        self.assertEqual(args[1], "7")
-        self.assertEqual(args[3], 99.5)
+        self.assertFalse(self.interface._fill_queue.empty())
+
+        # Verify queue contents
+        item = await self.interface._fill_queue.get()
+        self.assertEqual(item["row_id"], "7")
+        self.assertEqual(item["type"], "BUY")
 
     async def test_log_error_success(self):
         mock_worksheet = MagicMock()

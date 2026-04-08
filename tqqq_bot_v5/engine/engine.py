@@ -58,6 +58,11 @@ class GridEngine:
             await self.broker.disconnect()
             return
 
+        # Initialize Fills tracking
+        await self.sheet.load_recent_exec_ids(limit=50)
+        await self.sheet.start_fill_worker()
+        self.broker.subscribe_to_executions(self._handle_execution)
+
         # Start periodic tasks
         health_task = asyncio.create_task(self._log_health_periodic())
         heartbeat_task = asyncio.create_task(self._heartbeat_periodic())
@@ -81,6 +86,7 @@ class GridEngine:
             # 1. Cancel periodic tasks
             health_task.cancel()
             heartbeat_task.cancel()
+            await self.sheet.stop_fill_worker()
             try:
                 await asyncio.gather(health_task, heartbeat_task, return_exceptions=True)
             except asyncio.CancelledError:
@@ -519,6 +525,33 @@ class GridEngine:
         # Update last broker shares at end of tick
         self.last_broker_shares = broker_shares
 
+    def _handle_execution(self, exec_data: dict):
+        exec_id = exec_data.get("exec_id")
+        if not exec_id:
+            logger.warning("Execution missing exec_id, cannot process.")
+            return
+
+        if self.sheet.is_exec_id_seen(exec_id):
+            logger.debug(f"Execution {exec_id} already processed/queued. Skipping.")
+            return
+
+        # Mark as seen immediately to prevent concurrent duplicates from other callbacks
+        self.sheet.mark_exec_id_seen(exec_id)
+
+        order_id = exec_data.get("order_id", "")
+        row_index, action = self.order_manager.get_row_and_action(order_id)
+
+        # If the order manager knows the action, use it, otherwise use the side from the execution event
+        final_action = action if action else exec_data.get("type", "UNKNOWN")
+
+        exec_data["row_id"] = str(row_index) if row_index is not None else "UNKNOWN"
+        exec_data["type"] = final_action
+
+        logger.info(f"Queueing execution {exec_id} for order {order_id} (row {exec_data['row_id']})")
+
+        # Queue the fill to be written asynchronously
+        asyncio.create_task(self.sheet.log_fill(exec_data))
+
     def _handle_order_update(self, result: OrderResult):
         order_id = result.order_id
         if result.status == 'filled':
@@ -536,23 +569,7 @@ class GridEngine:
                 # Background sync attempt
                 asyncio.create_task(self._sync_to_sheet())
 
-                # Prepare data for sheet logging in Fills tab
-                log_data = {
-                    "row_id": str(row_index),
-                    "type": action,
-                    "filled_price": result.filled_price,
-                    "filled_qty": result.filled_qty,
-                    "order_id": order_id
-                }
-
-                async def _log_fill_safe(data):
-                    try:
-                        await self.sheet.log_fill(data)
-                    except Exception as e:
-                        logger.error(f"Background fill logging failed: {e}")
-
-                asyncio.create_task(_log_fill_safe(log_data))
-                logger.info(f"Logged fill for row {row_index}, order {order_id}")
+                logger.info(f"Updated row state for filled order {order_id} at row {row_index}")
             else:
                 logger.warning(f"Received fill for untracked order {order_id}")
         elif result.status in ('cancelled', 'error'):

@@ -32,6 +32,9 @@ class SheetInterface:
         self._client = gspread.authorize(self._creds)
         self._sheet = self._client.open_by_key(config.google_sheet_id)
         self._verified_tabs = set()
+        self._seen_exec_ids = set()
+        self._fill_queue = asyncio.Queue()
+        self._worker_task = None
 
     def _parse_numeric(self, value: str) -> float:
         """
@@ -135,23 +138,12 @@ class SheetInterface:
         worksheet.update_cell(row, col, value)
 
     async def log_fill(self, fill_data: dict) -> bool:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        # TIMESTAMP, ROW_ID, TYPE, FILLED_PRICE, FILLED_QTY, ORDER_ID
-        row = [
-            timestamp,
-            fill_data.get("row_id"),
-            fill_data.get("type"),
-            fill_data.get("filled_price"),
-            fill_data.get("filled_qty"),
-            fill_data.get("order_id")
-        ]
-
+        """Queues the fill data for background logging."""
         try:
-            await asyncio.to_thread(self._append_row_with_guard, FILLS_TAB_NAME, row, FILLS_HEADERS)
+            await self._fill_queue.put(fill_data)
             return True
         except Exception as e:
-            logger.error(f"Failed to log fill: {e}")
+            logger.error(f"Failed to queue fill logging: {e}")
             return False
 
     async def log_error(self, error_msg: str) -> bool:
@@ -208,3 +200,115 @@ class SheetInterface:
         except gspread.exceptions.WorksheetNotFound:
             logger.error(f"Worksheet '{worksheet_name}' not found in the spreadsheet.")
             raise
+
+    async def load_recent_exec_ids(self, limit: int = 50):
+        """Loads recent EXEC_IDs from the Fills tab to prepopulate the deduplication set."""
+        try:
+            worksheet = await asyncio.to_thread(self._sheet.worksheet, FILLS_TAB_NAME)
+
+            # Fetch all values to safely find the EXEC_ID column index and get last N rows
+            all_values = await asyncio.to_thread(worksheet.get_all_values)
+            if not all_values or len(all_values) <= 1:
+                logger.info("Fills tab is empty or only has headers. No recent exec_ids loaded.")
+                return
+
+            headers = all_values[0]
+            try:
+                exec_id_idx = headers.index("EXEC_ID")
+            except ValueError:
+                logger.warning("'EXEC_ID' column not found in Fills tab. Cannot load recent exec_ids.")
+                return
+
+            recent_rows = all_values[-(limit):]
+            loaded_count = 0
+            for row in recent_rows:
+                if len(row) > exec_id_idx:
+                    exec_id = row[exec_id_idx].strip()
+                    if exec_id and exec_id != "EXEC_ID":
+                        self._seen_exec_ids.add(exec_id)
+                        loaded_count += 1
+
+            logger.info(f"Loaded {loaded_count} recent exec_ids from Fills tab for deduplication.")
+
+        except gspread.exceptions.WorksheetNotFound:
+            logger.info("Fills tab not found yet. Skipping recent exec_ids load.")
+        except Exception as e:
+            logger.error(f"Failed to load recent exec_ids: {e}")
+
+    def is_exec_id_seen(self, exec_id: str) -> bool:
+        return exec_id in self._seen_exec_ids
+
+    def mark_exec_id_seen(self, exec_id: str):
+        self._seen_exec_ids.add(exec_id)
+
+    def unmark_exec_id_seen(self, exec_id: str):
+        self._seen_exec_ids.discard(exec_id)
+
+    async def start_fill_worker(self):
+        """Starts the background worker to process the fill logging queue."""
+        if self._worker_task is None or self._worker_task.done():
+            self._worker_task = asyncio.create_task(self._process_fill_queue())
+
+    async def stop_fill_worker(self):
+        """Stops the background worker."""
+        if self._worker_task and not self._worker_task.done():
+            self._worker_task.cancel()
+            try:
+                await self._worker_task
+            except asyncio.CancelledError:
+                pass
+
+    async def _process_fill_queue(self):
+        """Background worker loop to append fills to the Google Sheet with backoff retries."""
+        logger.info("Started background fill logging worker.")
+        while True:
+            try:
+                fill_data = await self._fill_queue.get()
+
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                # TIMESTAMP, EXEC_ID, ROW_ID, TYPE, FILLED_PRICE, FILLED_QTY, ORDER_ID, PERM_ID, SYMBOL
+                row = [
+                    timestamp,
+                    fill_data.get("exec_id", ""),
+                    fill_data.get("row_id", ""),
+                    fill_data.get("type", ""),
+                    fill_data.get("filled_price", ""),
+                    fill_data.get("filled_qty", ""),
+                    fill_data.get("order_id", ""),
+                    fill_data.get("perm_id", ""),
+                    fill_data.get("symbol", "")
+                ]
+
+                max_retries = 3
+                retry_delay = 2
+                success = False
+
+                for attempt in range(max_retries):
+                    try:
+                        await asyncio.to_thread(self._append_row_with_guard, FILLS_TAB_NAME, row, FILLS_HEADERS)
+                        success = True
+                        break
+                    except Exception as e:
+                        logger.warning(f"Failed to append fill to sheet (attempt {attempt + 1}/{max_retries}): {e}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+
+                if not success:
+                    logger.error(f"Permanently failed to append fill to sheet after {max_retries} attempts: {row}")
+                    # Unmark the exec_id so it can be retried if the event comes again
+                    exec_id = fill_data.get("exec_id")
+                    if exec_id:
+                        self.unmark_exec_id_seen(exec_id)
+                else:
+                    logger.info(f"Successfully logged execution {fill_data.get('exec_id')} to Fills tab.")
+
+                self._fill_queue.task_done()
+
+            except asyncio.CancelledError:
+                logger.info("Fill logging worker cancelled.")
+                break
+            except Exception as e:
+                logger.error(f"Unexpected error in fill logging worker: {e}", exc_info=True)
+                await asyncio.sleep(5) # Prevent tight loop on unexpected errors
