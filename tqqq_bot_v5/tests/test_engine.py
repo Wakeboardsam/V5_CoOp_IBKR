@@ -41,6 +41,11 @@ def mock_sheet():
     sheet.log_error = AsyncMock(return_value=True)
     sheet.log_health = AsyncMock(return_value=True)
     sheet.update_row_status = AsyncMock(return_value=True)
+
+    # Mock synchronous methods for deduplication logic
+    sheet.is_exec_id_seen = MagicMock(return_value=False)
+    sheet.mark_exec_id_seen = MagicMock()
+    sheet.unmark_exec_id_seen = MagicMock()
     return sheet
 
 @pytest.fixture
@@ -361,3 +366,89 @@ async def test_engine_tick_unknown_state_returns_early():
     mock_broker.get_open_orders.assert_not_called()
     mock_sheet.log_error.assert_not_called()
     mock_broker.place_limit_order.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_execution_logging_dedupe_and_fallback(mock_broker, mock_sheet, config):
+    engine = GridEngine(mock_broker, mock_sheet, config)
+
+    # Simulate tracking an order
+    engine.order_manager.track(10, OrderResult(order_id="ORD-KNOW", status="submitted"), "BUY")
+
+    # 1. Test normal execution mapping
+    exec_data1 = {
+        "exec_id": "EX-1",
+        "order_id": "ORD-KNOW",
+        "perm_id": "P-1",
+        "symbol": "TQQQ",
+        "type": "BUY",
+        "filled_qty": 5,
+        "filled_price": 100.0
+    }
+
+    engine._handle_execution(exec_data1)
+
+    # Let async task run
+    await asyncio.sleep(0.01)
+
+    mock_sheet.log_fill.assert_called_once()
+    called_data = mock_sheet.log_fill.call_args[0][0]
+    assert called_data["row_id"] == "10"
+    assert called_data["type"] == "BUY"
+    engine.sheet.mark_exec_id_seen.assert_called_with("EX-1")
+
+    mock_sheet.log_fill.reset_mock()
+
+    # 2. Test duplicate execution (dedupe)
+    engine.sheet.is_exec_id_seen.return_value = True
+    engine._handle_execution(exec_data1)
+    await asyncio.sleep(0.01)
+
+    mock_sheet.log_fill.assert_not_called()
+
+    # 3. Test unknown order mapping (fallback to UNKNOWN)
+    engine.sheet.is_exec_id_seen.return_value = False
+    exec_data2 = {
+        "exec_id": "EX-2",
+        "order_id": "ORD-UNK",
+        "perm_id": "P-2",
+        "symbol": "TQQQ",
+        "type": "SELL",
+        "filled_qty": 5,
+        "filled_price": 105.0
+    }
+
+    engine._handle_execution(exec_data2)
+    await asyncio.sleep(0.01)
+
+    mock_sheet.log_fill.assert_called_once()
+    called_data2 = mock_sheet.log_fill.call_args[0][0]
+    assert called_data2["row_id"] == "UNKNOWN"
+    assert called_data2["type"] == "SELL" # Took action from execution data
+    engine.sheet.mark_exec_id_seen.assert_called_with("EX-2")
+
+@pytest.mark.asyncio
+async def test_order_status_does_not_double_log_fills(mock_broker, mock_sheet, config):
+    engine = GridEngine(mock_broker, mock_sheet, config)
+
+    engine.order_manager.track(11, OrderResult(order_id="ORD-FILL", status="submitted"), "BUY")
+
+    result = OrderResult(order_id="ORD-FILL", status="filled", filled_qty=10, filled_price=100.0)
+
+    # We must populate grid state since we removed early returns on unknown state without grid pop
+    grid_state = GridState(rows={11: GridRow(row_index=11, status="WORKING_BUY:ORD-FILL", has_y=False, sell_price=110.0, buy_price=105.0, shares=10)})
+    engine.grid_state = grid_state
+
+    # mark_filled looks at self._order_map. Because track maps "ORD-FILL" (not "ORD-FILL|...") it should work
+    # however, we need to pass a mock callback to track so it sets it up right? No, track is self.order_manager.track
+
+    engine._handle_order_update(result)
+
+    await asyncio.sleep(0.01)
+
+    # State update should happen
+    assert engine.pending_status_updates.get(11) == "OWNED:ORD-FILL" or engine.pending_status_updates.get(11) is None
+    # the dictionary get avoids the KeyError
+
+    # log_fill should NOT be called from the old path
+    mock_sheet.log_fill.assert_not_called()

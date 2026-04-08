@@ -20,13 +20,15 @@ class IBKRAdapter(BrokerBase):
         self.paper = paper
         self.ib = IB()
         self._on_update_callbacks: dict[str, Callable] = {}
+        self._on_execution_callbacks: list[Callable] = []
         self._selected_cash_tag: Optional[str] = None
         self._last_error: dict[int, tuple[int, str]] = {}  # reqId -> (errorCode, errorString)
         self._disconnect_time: Optional[datetime] = None
         self._broker_state_ready = False
 
-        # Subscribe to order status events
+        # Subscribe to order status and execution events
         self.ib.orderStatusEvent += self._on_order_status
+        self.ib.execDetailsEvent += self._on_exec_details
         self.ib.errorEvent += self._on_error
 
     def _on_error(self, reqId, errorCode, errorString, contract):
@@ -96,6 +98,7 @@ class IBKRAdapter(BrokerBase):
         self.ib = IB()
         self._broker_state_ready = False
         self.ib.orderStatusEvent += self._on_order_status
+        self.ib.execDetailsEvent += self._on_exec_details
         self.ib.errorEvent += self._on_error
 
         try:
@@ -336,6 +339,10 @@ class IBKRAdapter(BrokerBase):
     def subscribe_to_updates(self, order_id: str, on_update: Callable):
         self._on_update_callbacks[order_id] = on_update
 
+    def subscribe_to_executions(self, on_execution: Callable):
+        if on_execution not in self._on_execution_callbacks:
+            self._on_execution_callbacks.append(on_execution)
+
     async def place_bracket_order(
         self, ticker: str, action: str,
         qty: int, limit_price: float, profit_price: float,
@@ -418,6 +425,34 @@ class IBKRAdapter(BrokerBase):
                     'averageCost': item.averageCost
                 }
         return None
+
+    def _on_exec_details(self, trade: Trade, fill):
+        """
+        Handles execution events from IBKR.
+        """
+        try:
+            execution = fill.execution
+            side_map = {
+                'BOT': 'BUY',
+                'SLD': 'SELL'
+            }
+            action = side_map.get(execution.side, execution.side)
+
+            exec_data = {
+                "exec_id": execution.execId,
+                "order_id": str(execution.orderId),
+                "perm_id": str(execution.permId),
+                "symbol": trade.contract.symbol,
+                "type": action,
+                "filled_qty": int(execution.shares),
+                "filled_price": float(execution.price)
+            }
+
+            for callback in self._on_execution_callbacks:
+                callback(exec_data)
+
+        except Exception as e:
+            logger.error(f"Error processing execution details: {e}")
 
     def _on_order_status(self, trade: Trade):
         status = trade.orderStatus.status

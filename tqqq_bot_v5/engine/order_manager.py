@@ -67,3 +67,8 @@ class OrderManager:
 
     def is_tracked(self, order_id: str) -> bool:
         return order_id in self._order_map
+
+    def get_row_and_action(self, order_id: str) -> Tuple[Optional[Any], Optional[str]]:
+        if order_id in self._order_map:
+            return self._order_map[order_id]
+        return None, None
