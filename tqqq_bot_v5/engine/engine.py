@@ -362,6 +362,13 @@ class GridEngine:
             logger.info("Full sell cycle detected (shares went to 0). Updating G7 anchor.")
             await self._write_fresh_anchor_ask()
 
+            # Immediately update last_broker_shares to prevent triggering again
+            self.last_broker_shares = broker_shares
+
+            # Anchor reset phase entered
+            logger.info("Anchor reset phase entered. Halting further trading evaluations for this tick.")
+            return
+
         sheet_shares = sum(row.shares for row in self.grid_state.rows.values() if row.has_y)
         mismatch_active = False
 
@@ -461,6 +468,19 @@ class GridEngine:
                             if getattr(self, '_is_weekend_gap', False):
                                 logger.debug(f"Skipping BUY order for row {row.row_index} due to weekend gap")
                                 continue
+
+                            # Protective reconciliation for row 7 anchor order
+                            if row.row_index == 7 and self.order_manager.has_open_buy(7):
+                                for o in open_orders:
+                                    if o['action'] == 'BUY' and self.order_manager.is_tracked(o['order_id']):
+                                        r_index, _ = self.order_manager.get_row_and_action(o['order_id'])
+                                        if r_index == 7:
+                                            live_qty = o.get('qty')
+                                            live_price = o.get('limit_price')
+                                            if live_qty != row.shares or live_price != row.buy_price:
+                                                logger.warning(f"Anchor order mismatch detected for row 7: live order qty/price={live_qty}@{live_price}, sheet qty/price={row.shares}@{row.buy_price}")
+                                                # We skip further processing for this row in this tick (do not auto-cancel-replace yet)
+                                                break # Will continue with the outer loop since the outer `if not self.order_manager.has_open_buy` will be false and we do nothing else
 
                             # Expect active BUY order
                             if not self.order_manager.has_open_buy(row.row_index):

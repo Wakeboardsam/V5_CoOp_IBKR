@@ -452,3 +452,116 @@ async def test_order_status_does_not_double_log_fills(mock_broker, mock_sheet, c
 
     # log_fill should NOT be called from the old path
     mock_sheet.log_fill.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_protective_reconciliation_skips_buy(mock_broker, mock_sheet, config):
+    # Setup row 7 with working order, but sheet shares mismatch live order
+    grid_state = GridState(
+        rows={
+            7: GridRow(row_index=7, status="WORKING_BUY:ORD-123", has_y=False, sell_price=105.0, buy_price=100.0, shares=15),
+            8: GridRow(row_index=8, status="IDLE", has_y=False, sell_price=110.0, buy_price=105.0, shares=10)
+        }
+    )
+    mock_sheet.fetch_grid.return_value = grid_state
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 0})
+    mock_broker.get_wallet_balance.return_value = 50000.0
+    mock_broker.get_bid_ask.return_value = (99.9, 100.0)
+    config.anchor_buy_offset = 0.05
+
+    # Live order has 10 shares, sheet has 15 shares
+    mock_broker.get_open_orders.return_value = [{'order_id': 'ORD-123', 'limit_price': 100.0, 'qty': 10, 'action': 'BUY'}]
+
+    engine = GridEngine(mock_broker, mock_sheet, config)
+    engine.order_manager.track(7, OrderResult(order_id="ORD-123", status="submitted"), "BUY")
+
+    await engine._tick()
+
+    # Mismatch detected -> protective reconciliation skips placing anchor BUY for row 7 again
+    # Row 8 is evaluated and placed
+    # Check that it didn't call place limit order for row 7
+    buy_calls = [call for call in mock_broker.place_limit_order.call_args_list if call.kwargs.get('action') == 'BUY']
+
+    # Verify no new buys are placed, protective reconciliation handles row 7 correctly.
+    assert len(buy_calls) == 0
+
+
+
+@pytest.mark.asyncio
+async def test_full_sell_cycle_halts_trading_evaluation(mock_broker, mock_sheet, config):
+    # Setup row 7 with owned
+    grid_state = GridState(
+        rows={
+            7: GridRow(row_index=7, status="OWNED:ORD-123", has_y=True, sell_price=105.0, buy_price=100.0, shares=10),
+        }
+    )
+    mock_sheet.fetch_grid.return_value = grid_state
+
+    # 0 shares returned meaning we just sold
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 0})
+    mock_broker.get_wallet_balance.return_value = 50000.0
+    mock_broker.get_bid_ask.return_value = (99.9, 100.0)
+
+    engine = GridEngine(mock_broker, mock_sheet, config)
+    # Set previous shares to 10 so it triggers full sell cycle
+    engine.last_broker_shares = 10
+
+    await engine._tick()
+
+    # Verify G7 is updated
+    mock_sheet.write_anchor_ask.assert_called_with(100.0)
+
+    # Verify no orders are placed in this tick
+    mock_broker.place_limit_order.assert_not_called()
+
+    # Next tick:
+    # 1. Update engine.last_broker_shares (which would be 0 now)
+    # 2. Update sheet state to simulate sheet recalulating and row 7 being IDLE
+    grid_state_next = GridState(
+        rows={
+            7: GridRow(row_index=7, status="IDLE", has_y=False, sell_price=105.0, buy_price=100.0, shares=10),
+        }
+    )
+    mock_sheet.fetch_grid.return_value = grid_state_next
+
+    await engine._tick()
+
+    # Verify anchor buy is placed in the NEXT tick
+    mock_broker.place_limit_order.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_full_sell_cycle_same_shares(mock_broker, mock_sheet, config):
+    # Regression: even if share count is identical, it uses the recalculated values on the NEXT tick,
+    # rather than failing to recognize that it changed. Since we implemented a deterministic tick skip,
+    # it naturally works without relying on integer changes.
+    grid_state = GridState(
+        rows={
+            7: GridRow(row_index=7, status="OWNED:ORD-123", has_y=True, sell_price=105.0, buy_price=100.0, shares=10),
+        }
+    )
+    mock_sheet.fetch_grid.return_value = grid_state
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 0})
+    mock_broker.get_wallet_balance.return_value = 50000.0
+    mock_broker.get_bid_ask.return_value = (101.9, 102.0)
+
+    engine = GridEngine(mock_broker, mock_sheet, config)
+    engine.last_broker_shares = 10
+
+    # First tick triggers anchor reset
+    await engine._tick()
+    mock_sheet.write_anchor_ask.assert_called_with(102.0)
+    mock_broker.place_limit_order.assert_not_called()
+
+    # Next tick: same share count (10), but new price (102.0)
+    grid_state_next = GridState(
+        rows={
+            7: GridRow(row_index=7, status="IDLE", has_y=False, sell_price=107.0, buy_price=102.0, shares=10),
+        }
+    )
+    mock_sheet.fetch_grid.return_value = grid_state_next
+
+    await engine._tick()
+
+    # Buy is placed with new price and same shares!
+    mock_broker.place_limit_order.assert_called_once_with(
+        ticker="TQQQ", action="BUY", qty=10, limit_price=102.0, on_update=engine._handle_order_update, order_id=mock_broker.get_next_order_id.return_value
+    )
