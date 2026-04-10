@@ -477,8 +477,12 @@ class GridEngine:
                                         if r_index == 7:
                                             live_qty = o.get('qty')
                                             live_price = o.get('limit_price')
-                                            if live_qty != row.shares or live_price != row.buy_price:
-                                                logger.warning(f"Anchor order mismatch detected for row 7: live order qty/price={live_qty}@{live_price}, sheet qty/price={row.shares}@{row.buy_price}")
+                                            expected_buy_price = row.buy_price
+                                            if distal_y == 0:
+                                                expected_buy_price += self.config.anchor_buy_offset
+
+                                            if live_qty != row.shares or abs(live_price - expected_buy_price) > 0.001:
+                                                logger.warning(f"Anchor order mismatch detected for row 7: live order qty/price={live_qty}@{live_price}, expected qty/price={row.shares}@{expected_buy_price}")
                                                 # We skip further processing for this row in this tick (do not auto-cancel-replace yet)
                                                 break # Will continue with the outer loop since the outer `if not self.order_manager.has_open_buy` will be false and we do nothing else
 
@@ -488,6 +492,7 @@ class GridEngine:
 
                                 if row.row_index == 7 and distal_y == 0:
                                     # Anchor acquisition!
+                                    buy_price += self.config.anchor_buy_offset
                                     logger.info("Anchor acquisition condition met for row 7")
                                     # We check spread using a fresh ask but we DO NOT write it to G7 here.
                                     # We use the existing buy_price from the sheet (calculated from current G7).
@@ -495,7 +500,7 @@ class GridEngine:
                                     if self.spread_guard.is_too_wide(bid, ask):
                                         continue
 
-                                    logger.info(f"Placing anchor BUY for row 7 at {buy_price} (sheet-derived)")
+                                    logger.info(f"Placing anchor BUY for row 7 at {buy_price} (including offset {self.config.anchor_buy_offset})")
                                 else:
                                     logger.info(f"Placing missing BUY for empty row {row.row_index}")
 

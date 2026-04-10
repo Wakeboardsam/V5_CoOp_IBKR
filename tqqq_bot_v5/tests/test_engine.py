@@ -174,10 +174,57 @@ async def test_anchor_acquisition(mock_broker, mock_sheet, config):
     # Bug 1 Fix: Should NOT write anchor ask to G7 on buy placement
     mock_sheet.write_anchor_ask.assert_not_called()
 
-    # Should place buy order at price from sheet
+    # Should place buy order at price from sheet + offset
     mock_broker.place_limit_order.assert_any_call(
-        ticker="TQQQ", action="BUY", qty=10, limit_price=100.0, on_update=engine._handle_order_update, order_id="ORD-123"
+        ticker="TQQQ", action="BUY", qty=10, limit_price=100.05, on_update=engine._handle_order_update, order_id="ORD-123"
     )
+
+@pytest.mark.asyncio
+async def test_non_anchor_buy_no_offset(mock_broker, mock_sheet, config):
+    # distal_y == 7 condition, so row 8 is NOT an anchor buy
+    grid_state = GridState(
+        rows={
+            7: GridRow(row_index=7, status="OWNED:OLD", has_y=True, sell_price=105.0, buy_price=100.0, shares=10),
+            8: GridRow(row_index=8, status="IDLE", has_y=False, sell_price=110.0, buy_price=105.0, shares=10)
+        }
+    )
+    mock_sheet.fetch_grid.return_value = grid_state
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 10})
+    config.anchor_buy_offset = 0.05
+
+    engine = GridEngine(mock_broker, mock_sheet, config)
+    await engine._tick()
+
+    # Should place buy order for row 8 at exact sheet price
+    mock_broker.place_limit_order.assert_any_call(
+        ticker="TQQQ", action="BUY", qty=10, limit_price=105.0, on_update=engine._handle_order_update, order_id=mock_broker.get_next_order_id.return_value
+    )
+
+@pytest.mark.asyncio
+async def test_protective_reconciliation_with_offset(mock_broker, mock_sheet, config):
+    # distal_y == 0
+    grid_state = GridState(
+        rows={
+            7: GridRow(row_index=7, status="WORKING_BUY:ORD-123", has_y=False, sell_price=105.0, buy_price=100.0, shares=10),
+        }
+    )
+    mock_sheet.fetch_grid.return_value = grid_state
+    mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 0})
+    config.anchor_buy_offset = 0.05
+
+    # Live order has price 100.05 (100.0 + 0.05)
+    mock_broker.get_open_orders.return_value = [{'order_id': 'ORD-123', 'limit_price': 100.05, 'qty': 10, 'action': 'BUY'}]
+
+    engine = GridEngine(mock_broker, mock_sheet, config)
+    engine.order_manager.track(7, OrderResult(order_id="ORD-123", status="submitted"), "BUY")
+
+    await engine._tick()
+
+    # Should NOT log a warning because 100.05 is the expected price including offset
+    mock_sheet.log_error.assert_not_called()
+    # verify it didn't call place_limit_order again
+    buy_calls = [call for call in mock_broker.place_limit_order.call_args_list if call.kwargs.get('action') == 'BUY']
+    assert len(buy_calls) == 0
 
 @pytest.mark.asyncio
 async def test_no_anchor_write_if_owned(mock_broker, mock_sheet, config):
