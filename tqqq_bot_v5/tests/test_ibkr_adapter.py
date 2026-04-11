@@ -480,8 +480,8 @@ async def test_normal_reconnect_transitions_to_ready(mock_ib):
     adapter.ib.isConnected = MagicMock(return_value=True)
     # Account values are present
     adapter.ib.accountValues = MagicMock(return_value=[MagicMock()])
-    # Positions succeed
-    adapter.get_positions = AsyncMock(return_value={})
+    # Positions sync succeeds explicitly
+    adapter.ib.reqPositionsAsync = AsyncMock(return_value=[])
 
     adapter._broker_state_ready = False
     adapter._connected_not_ready_since = datetime.datetime.now()
@@ -501,15 +501,12 @@ async def test_positions_timeout_keeps_state_not_ready(mock_ib):
     # Account values are present
     adapter.ib.accountValues = MagicMock(return_value=[MagicMock()])
 
-    # Positions timeout
-    adapter.get_positions = AsyncMock()
+    # Explicit active sync timeout
+    adapter.ib.reqPositionsAsync = AsyncMock(side_effect=TimeoutError("timeout"))
 
     adapter._broker_state_ready = False
     adapter._connected_not_ready_since = None
 
-    # Since timeout is 10s we can use patch/mock to make wait_for fail faster in test,
-    # but actual wait_for raises TimeoutError, which we catch. Let's just mock wait_for to raise TimeoutError.
-    adapter.get_positions.side_effect = TimeoutError("timeout")
     await adapter.ensure_connected()
 
     assert adapter._broker_state_ready is False

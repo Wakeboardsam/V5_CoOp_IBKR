@@ -66,16 +66,17 @@ class IBKRAdapter(BrokerBase):
             # Missing account values
             logger.info("IBKR transport connected but accountValues is empty.")
         else:
-            # Account values exist. Try to fetch positions to ensure sync is not stuck.
-            # It's fine if the result is empty, as long as it doesn't throw or timeout.
+            # Account values exist, but we must explicitly prove the connection isn't returning
+            # an empty wrapper cache. reqPositionsAsync() forces a live fetch from the broker
+            # and only completes when the positionEnd marker is received.
             try:
-                await asyncio.wait_for(self.get_positions(), timeout=10.0)
+                await asyncio.wait_for(self.ib.reqPositionsAsync(), timeout=10.0)
                 is_state_valid = True
             except Exception as e:
-                logger.warning(f"Positions fetch timed out or failed during health check: {e}. Sync is stuck.")
+                logger.warning(f"Active positions fetch timed out or failed during health check: {e}. Sync is stuck.")
 
         if is_state_valid:
-            # Successfully accessed positions and account values
+            # Successfully forced a live fetch and got account values
             self._broker_state_ready = True
             self._connected_not_ready_since = None
             self._degraded_reconnect_attempted = False
