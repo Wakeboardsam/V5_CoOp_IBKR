@@ -408,3 +408,109 @@ async def test_ibkr_reconnect_clears_state_and_readiness():
     # Test that get_position_snapshot now correctly returns is_ready=False
     snapshot = await adapter.get_position_snapshot()
     assert snapshot.is_ready is False
+
+@pytest.mark.asyncio
+async def test_degraded_state_timer_starts(mock_ib):
+    adapter = IBKRAdapter("127.0.0.1", 7497, 1, False)
+    adapter.ib = mock_ib
+    adapter.ib.isConnected = MagicMock(return_value=True)
+    adapter.ib.accountValues = MagicMock(return_value=[]) # Empty -> not ready
+    adapter._broker_state_ready = False
+
+    assert adapter._connected_not_ready_since is None
+
+    await adapter.ensure_connected()
+
+    assert adapter._connected_not_ready_since is not None
+    assert adapter._broker_state_ready is False
+
+@pytest.mark.asyncio
+async def test_degraded_state_reconnects_after_timeout(mock_ib):
+    adapter = IBKRAdapter("127.0.0.1", 7497, 1, False)
+    adapter.ib = mock_ib
+    adapter.ib.isConnected = MagicMock(return_value=True)
+    adapter.ib.accountValues = MagicMock(return_value=[]) # Empty -> not ready
+    adapter._broker_state_ready = False
+
+    # Set timer back 3 minutes to trigger timeout
+    adapter._connected_not_ready_since = datetime.datetime.now() - datetime.timedelta(minutes=3)
+    adapter._degraded_reconnect_attempted = False
+
+    # Mock connectAsync
+    adapter.ib.connectAsync = AsyncMock()
+    adapter.ib.disconnect = MagicMock()
+    adapter.ib.orderStatusEvent = MagicMock()
+    adapter.ib.execDetailsEvent = MagicMock()
+    adapter.ib.errorEvent = MagicMock()
+
+    with patch('brokers.ibkr.adapter.IB', return_value=adapter.ib):
+        await adapter.ensure_connected()
+
+    # Verify we attempted a reconnect
+    assert adapter._degraded_reconnect_attempted is True
+    adapter.ib.connectAsync.assert_awaited() # async_connect uses connectAsync under the hood
+    # Timer should be reset
+    assert (datetime.datetime.now() - adapter._connected_not_ready_since).total_seconds() < 5
+
+@pytest.mark.asyncio
+async def test_degraded_state_escalates_to_sigterm(mock_ib):
+    adapter = IBKRAdapter("127.0.0.1", 7497, 1, False)
+    adapter.ib = mock_ib
+    adapter.ib.isConnected = MagicMock(return_value=True)
+    adapter.ib.accountValues = MagicMock(return_value=[]) # Empty -> not ready
+    adapter._broker_state_ready = False
+
+    # Set timer back 3 minutes to trigger timeout
+    adapter._connected_not_ready_since = datetime.datetime.now() - datetime.timedelta(minutes=3)
+    # We already tried reconnecting
+    adapter._degraded_reconnect_attempted = True
+
+    with patch('os.kill') as mock_kill:
+        with pytest.raises(ConnectionError, match="Degraded state watchdog triggered"):
+            await adapter.ensure_connected()
+
+        # Verify SIGTERM sent to PID 1
+        import signal
+        mock_kill.assert_called_once_with(1, signal.SIGTERM)
+
+@pytest.mark.asyncio
+async def test_normal_reconnect_transitions_to_ready(mock_ib):
+    adapter = IBKRAdapter("127.0.0.1", 7497, 1, False)
+    adapter.ib = mock_ib
+    adapter.ib.isConnected = MagicMock(return_value=True)
+    # Account values are present
+    adapter.ib.accountValues = MagicMock(return_value=[MagicMock()])
+    # Positions succeed
+    adapter.get_positions = AsyncMock(return_value={})
+
+    adapter._broker_state_ready = False
+    adapter._connected_not_ready_since = datetime.datetime.now()
+    adapter._degraded_reconnect_attempted = True
+
+    await adapter.ensure_connected()
+
+    assert adapter._broker_state_ready is True
+    assert adapter._connected_not_ready_since is None
+    assert adapter._degraded_reconnect_attempted is False
+
+@pytest.mark.asyncio
+async def test_positions_timeout_keeps_state_not_ready(mock_ib):
+    adapter = IBKRAdapter("127.0.0.1", 7497, 1, False)
+    adapter.ib = mock_ib
+    adapter.ib.isConnected = MagicMock(return_value=True)
+    # Account values are present
+    adapter.ib.accountValues = MagicMock(return_value=[MagicMock()])
+
+    # Positions timeout
+    adapter.get_positions = AsyncMock()
+
+    adapter._broker_state_ready = False
+    adapter._connected_not_ready_since = None
+
+    # Since timeout is 10s we can use patch/mock to make wait_for fail faster in test,
+    # but actual wait_for raises TimeoutError, which we catch. Let's just mock wait_for to raise TimeoutError.
+    adapter.get_positions.side_effect = TimeoutError("timeout")
+    await adapter.ensure_connected()
+
+    assert adapter._broker_state_ready is False
+    assert adapter._connected_not_ready_since is not None
