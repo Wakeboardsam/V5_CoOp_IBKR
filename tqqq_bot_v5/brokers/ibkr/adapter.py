@@ -25,6 +25,8 @@ class IBKRAdapter(BrokerBase):
         self._last_error: dict[int, tuple[int, str]] = {}  # reqId -> (errorCode, errorString)
         self._disconnect_time: Optional[datetime] = None
         self._broker_state_ready = False
+        self._connected_not_ready_since: Optional[datetime] = None
+        self._degraded_reconnect_attempted: bool = False
 
         # Subscribe to order status and execution events
         self.ib.orderStatusEvent += self._on_order_status
@@ -40,18 +42,94 @@ class IBKRAdapter(BrokerBase):
         connected = await async_connect(self.ib, self.host, self.port, self.client_id)
         if connected:
             self.ib.reqMarketDataType(3)
+            self._connected_not_ready_since = datetime.now()
+            self._degraded_reconnect_attempted = False
         return connected
 
     async def disconnect(self):
         self._broker_state_ready = False
+        self._connected_not_ready_since = None
+        self._degraded_reconnect_attempted = False
         self.ib.disconnect()
 
     async def is_connected(self) -> bool:
         return self.ib.isConnected()
 
+    async def _check_broker_state_health(self):
+        if self._broker_state_ready:
+            return
+
+        # Flag indicating if we successfully validated state
+        is_state_valid = False
+
+        if not self.ib.accountValues():
+            # Missing account values
+            logger.info("IBKR transport connected but accountValues is empty.")
+        else:
+            # Account values exist, but we must explicitly prove the connection isn't returning
+            # an empty wrapper cache. reqPositionsAsync() forces a live fetch from the broker
+            # and only completes when the positionEnd marker is received.
+            try:
+                await asyncio.wait_for(self.ib.reqPositionsAsync(), timeout=10.0)
+                is_state_valid = True
+            except Exception as e:
+                logger.warning(f"Active positions fetch timed out or failed during health check: {e}. Sync is stuck.")
+
+        if is_state_valid:
+            # Successfully forced a live fetch and got account values
+            self._broker_state_ready = True
+            self._connected_not_ready_since = None
+            self._degraded_reconnect_attempted = False
+            logger.info("Broker state transitioned to READY (accountValues populated and positions synced).")
+            return
+
+        # Account not ready yet.
+        if self._connected_not_ready_since is None:
+            self._connected_not_ready_since = datetime.now()
+            logger.info("Entering degraded recovery watchdog: account state not ready.")
+
+        time_waiting = datetime.now() - self._connected_not_ready_since
+        if time_waiting > timedelta(minutes=2):
+            logger.warning(f"Degraded timeout exceeded: transport connected but account state not ready for {time_waiting}.")
+            if not self._degraded_reconnect_attempted:
+                logger.info("Attempting full IB object reset/reconnect due to degraded state...")
+
+                try:
+                    self.ib.disconnect()
+                except Exception:
+                    pass
+
+                self.ib = IB()
+                self._broker_state_ready = False
+                self.ib.orderStatusEvent += self._on_order_status
+                self.ib.execDetailsEvent += self._on_exec_details
+                self.ib.errorEvent += self._on_error
+
+                try:
+                    connected = await async_connect(self.ib, self.host, self.port, self.client_id)
+                    if connected:
+                        logger.info("Degraded state recovery: successfully reconnected with fresh IB object. Giving account sync 2 minutes.")
+                        self.ib.reqMarketDataType(3)
+                        self._connected_not_ready_since = datetime.now()
+                        self._degraded_reconnect_attempted = True
+                    else:
+                        logger.error("Degraded state recovery reconnect failed.")
+                except Exception as e:
+                    logger.error(f"Degraded state recovery reconnect exception: {e}")
+            else:
+                logger.critical("Degraded state watchdog: reconnect failed to restore account state. Triggering full container restart via SIGTERM to PID 1.")
+                try:
+                    os.kill(1, signal.SIGTERM)
+                except Exception as e:
+                    logger.error(f"Failed to send SIGTERM to PID 1: {e}")
+                raise ConnectionError("Degraded state watchdog triggered container restart after failing to recover account state.")
+        else:
+            logger.info(f"Waiting for account sync (elapsed: {time_waiting})...")
+
     async def ensure_connected(self):
         if await self.is_connected():
             self._disconnect_time = None
+            await self._check_broker_state_health()
             return
 
         self._broker_state_ready = False
@@ -84,6 +162,8 @@ class IBKRAdapter(BrokerBase):
                 logger.info("Watchdog Stage 1 successfully reconnected.")
                 self.ib.reqMarketDataType(3)
                 self._disconnect_time = None
+                self._connected_not_ready_since = datetime.now()
+                self._degraded_reconnect_attempted = False
                 return
         except Exception as e:
             logger.error(f"Stage 1 reconnect failed: {e}")
@@ -110,6 +190,8 @@ class IBKRAdapter(BrokerBase):
                 logger.info("Watchdog Stage 2 successfully reconnected with fresh IB object.")
                 self.ib.reqMarketDataType(3)
                 self._disconnect_time = None
+                self._connected_not_ready_since = datetime.now()
+                self._degraded_reconnect_attempted = False
                 return
         except Exception as e:
             logger.error(f"Stage 2 reconnect failed: {e}")
@@ -401,12 +483,7 @@ class IBKRAdapter(BrokerBase):
 
     async def get_position_snapshot(self) -> PositionSnapshot:
         if not self._broker_state_ready:
-            # Heuristic: accountValues() is almost always populated immediately upon account sync
-            if self.ib.accountValues():
-                self._broker_state_ready = True
-                logger.info("Broker state transitioned to READY (accountValues populated).")
-            else:
-                return PositionSnapshot(is_ready=False, positions={})
+            return PositionSnapshot(is_ready=False, positions={})
 
         positions = await self.get_positions()
         return PositionSnapshot(is_ready=True, positions=positions)
