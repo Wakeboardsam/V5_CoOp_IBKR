@@ -91,11 +91,24 @@ class PublicAdapter(BrokerBase):
 
     async def get_net_liquidation_value(self) -> Optional[float]:
         portfolio = await self.client.get_portfolio(account_id=self.account_id)
-        if hasattr(portfolio, "equity") and portfolio.equity:
-            cash_rows = [row for row in portfolio.equity if getattr(row, "type", None) == "CASH"]
-            if cash_rows:
-                return float(cash_rows[0].value)
-        return None
+        if hasattr(portfolio, "total_value"):
+            return float(portfolio.total_value)
+
+        # Fallback: manually sum equity value
+        try:
+            total_equity = 0.0
+            if hasattr(portfolio, "equity") and portfolio.equity:
+                for row in portfolio.equity:
+                    total_equity += float(row.value)
+            elif hasattr(portfolio, "positions"):
+                for p in portfolio.positions:
+                    total_equity += float(p.current_value)
+                total_equity += float(portfolio.buying_power.cash_only_buying_power)
+
+            return total_equity if total_equity > 0 else None
+        except Exception as e:
+            logger.warning(f"Failed to calculate net liquidation value: {e}")
+            return None
 
     async def get_next_order_id(self) -> str:
         return str(uuid.uuid4())
@@ -194,92 +207,60 @@ class PublicAdapter(BrokerBase):
         # Currently unsupported by Public API directly in MVP format, but we'll raise an error or stub it
         raise NotImplementedError("Bracket orders are not natively supported by PublicAdapter MVP.")
 
-    async def replace_order(self, order_id: str, new_qty: int, new_limit: float) -> bool:
-        """
-        Attempt replace; fall back to cancel -> place if replace rejects.
-
-        Public's changelog says equity cancel-replace became available March 26, 2026,
-        but docs still say "coming soon." Treat changelog as source of truth with fallback.
-        Docs: https://public.com/api/docs/changelog
-        """
-        if not self.prefer_replace:
-            # Fallback path if explicitly requested
-            raise NotImplementedError("Replace disabled by prefer_replace config.")
-
-        try:
-            await self.client.replace_order(
-                order_id=order_id,
-                quantity=Decimal(str(new_qty)),
-                limit_price=Decimal(str(new_limit)),
-                account_id=self.account_id
-            )
-            # Confirm replacement took effect
-            await self._get_order_with_retry(order_id)
-            logger.info(f"Order {order_id} replaced successfully")
-            return True
-        except Exception as e:
-            logger.warning(
-                f"Replace order {order_id} failed ({type(e).__name__}: {e}). "
-                "Falling back to cancel -> place."
-            )
-
-            # Fallback: cancel the original, wait, then place a new order
-            try:
-                await self.cancel_order(order_id)
-                await asyncio.sleep(0.5)  # Give cancel time to settle
-
-                new_order_id = await self.get_next_order_id()
-
-                # We need the original order context to re-place it
-                context = self._order_cache.get(order_id)
-                if not context:
-                    raise RuntimeError(f"Cannot fallback replace: order {order_id} context missing from cache.")
-
-                logger.info(f"Cancelled {order_id}, placing new order {new_order_id} as fallback")
-
-                result = await self.place_limit_order(
-                    ticker=context["ticker"],
-                    action=context["action"],
-                    qty=new_qty,
-                    limit_price=new_limit,
-                    extended_hours=context["extended_hours"],
-                    order_id=new_order_id
-                )
-
-                # Copy the old order's update callback over to the new one
-                if order_id in self._order_callbacks:
-                    self._order_callbacks[new_order_id] = self._order_callbacks[order_id]
-
-                return True
-            except Exception as fallback_e:
-                logger.error(f"Fallback replace also failed: {fallback_e}")
-                return False
-
     async def _handle_order_update(self, update):
         cb = self._order_callbacks.get(update.order_id)
-        if not cb:
-            return
 
         status = str(update.new_status)
         mapped = "submitted"
 
         if status in {"FILLED"}:
             mapped = "filled"
+            # Trigger execution callbacks
+            exec_id = f"EXEC-{update.order_id}-{uuid.uuid4().hex[:8]}"
+            filled_qty = int(update.filled_quantity) if getattr(update, "filled_quantity", None) else 0
+            filled_price = float(update.average_execution_price) if getattr(update, "average_execution_price", None) else 0.0
+
+            # Fetch side from cache since it's not always in the update event
+            action = "UNKNOWN"
+            if update.order_id in self._order_cache:
+                action = self._order_cache[update.order_id]["action"]
+
+            exec_data = {
+                "exec_id": exec_id,
+                "order_id": update.order_id,
+                "type": action,
+                "filled_qty": filled_qty,
+                "filled_price": filled_price,
+            }
+            for e_cb in self._execution_callbacks:
+                e_cb(exec_data)
+
         elif status in {"CANCELLED", "QUEUED_CANCELLED"}:
             mapped = "cancelled"
         elif status in {"REJECTED", "EXPIRED"}:
             mapped = "error"
 
-        result = OrderResult(
-            order_id=update.order_id,
-            status=mapped,
-        )
-        cb(result)
+        if cb:
+            result = OrderResult(
+                order_id=update.order_id,
+                status=mapped,
+            )
+            cb(result)
 
     async def cancel_order(self, order_id: str) -> bool:
         await self.client.cancel_order(order_id=order_id, account_id=self.account_id)
-        # Verify it successfully cancelled
-        await self._get_order_with_retry(order_id)
+
+        # Verify it successfully cancelled by polling up to 5 times (1s)
+        for _ in range(5):
+            try:
+                order = await self.client.get_order(order_id=order_id, account_id=self.account_id)
+                if str(order.status) in {"CANCELLED", "QUEUED_CANCELLED", "REJECTED"}:
+                    return True
+            except NotFoundError:
+                pass
+            await asyncio.sleep(0.2)
+
+        logger.warning(f"Order {order_id} cancel request sent but status not confirmed as CANCELLED within 1s.")
         return True
 
     async def get_open_orders(self) -> list[dict]:

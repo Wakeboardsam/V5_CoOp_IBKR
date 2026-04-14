@@ -58,7 +58,6 @@ async def test_share_mismatch_halt(mock_broker, mock_sheet, config):
     mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 0})
 
     engine = GridEngine(mock_broker, mock_sheet, config)
-    engine._should_use_extended_hours = lambda: True
     await engine._tick()
 
     # Should log error and return early
@@ -74,7 +73,6 @@ async def test_share_mismatch_warn(mock_broker, mock_sheet, config):
     mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 0})
 
     engine = GridEngine(mock_broker, mock_sheet, config)
-    engine._should_use_extended_hours = lambda: True
     await engine._tick()
 
     # 1. Should log error to sheet
@@ -108,7 +106,6 @@ async def test_share_mismatch_warn_retracking(mock_broker, mock_sheet, config):
     mock_broker.get_open_orders.return_value = [{'order_id': 'ORD-EXISTING', 'action': 'SELL'}]
 
     engine = GridEngine(mock_broker, mock_sheet, config)
-    engine._should_use_extended_hours = lambda: True
     await engine._tick()
 
     # Should re-track existing order despite mismatch
@@ -133,7 +130,6 @@ async def test_share_mismatch_warn_outside_window(mock_broker, mock_sheet, confi
     # Track the order so engine knows it should cancel it
 
     engine = GridEngine(mock_broker, mock_sheet, config)
-    engine._should_use_extended_hours = lambda: True
     from brokers.base import OrderResult
     engine.order_manager.track(15, OrderResult(order_id="ORD-OUTSIDE", status="submitted"), "BUY")
 
@@ -150,7 +146,6 @@ async def test_share_mismatch_warn_log_error_fails(mock_broker, mock_sheet, conf
     mock_sheet.log_error.side_effect = Exception("API Failure")
 
     engine = GridEngine(mock_broker, mock_sheet, config)
-    engine._should_use_extended_hours = lambda: True
     await engine._tick()
 
     # Bot should NOT crash and should STILL place the SELL order

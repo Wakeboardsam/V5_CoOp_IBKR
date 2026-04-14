@@ -52,12 +52,12 @@ def load_config(path: str = "/data/options.json") -> AppConfig:
             data = json.load(f)
         config = AppConfig(**data)
 
-        # Log any public settings warnings (they don't strictly crash the bot here,
-        # but could be fatal at connect time)
-        import logging
-        logger = logging.getLogger(__name__)
-        for warning in validate_public_settings(config):
-            logger.warning(warning)
+        # Fail fast if public settings are invalid
+        public_warnings = validate_public_settings(config)
+        if public_warnings:
+            for warning in public_warnings:
+                print(f"Error: {warning}", file=sys.stderr)
+            sys.exit(1)
 
         return config
     except FileNotFoundError:
