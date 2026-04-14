@@ -216,7 +216,8 @@ class PublicAdapter(BrokerBase):
         if status in {"FILLED"}:
             mapped = "filled"
             # Trigger execution callbacks
-            exec_id = f"EXEC-{update.order_id}-{uuid.uuid4().hex[:8]}"
+            # Use deterministic ID to prevent double-logging from duplicate update events
+            exec_id = f"EXEC-{update.order_id}-FILLED"
             filled_qty = int(update.filled_quantity) if getattr(update, "filled_quantity", None) else 0
             filled_price = float(update.average_execution_price) if getattr(update, "average_execution_price", None) else 0.0
 
