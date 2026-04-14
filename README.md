@@ -73,8 +73,12 @@ Columns: `TIMESTAMP`, `ERROR_MSG`.
 
 | Key | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `active_broker` | string | `ibkr` | Currently supported: `ibkr`. |
+| `active_broker` | string | `ibkr` | Currently supported: `ibkr`, `schwab`, `public`. |
 | `paper_trading` | boolean | `true` | Use paper trading account if true. |
+| `public_secret_key` | string | `null` | Public.com API secret key (Required if active_broker=public). |
+| `public_account_id` | string | `null` | Public.com Account ID (Required if active_broker=public). |
+| `public_preflight_enabled` | boolean | `true` | Enable Preflight checks on Public orders. |
+| `public_prefer_replace` | boolean | `true` | Use cancel-and-replace for Public instead of cancel-and-place. |
 | `ibkr_host` | string | `127.0.0.1` | Host for IB Gateway/TWS. |
 | `ibkr_port` | integer | `7497` | Port for IB Gateway/TWS. |
 | `ibkr_client_id` | integer | `1` | API Client ID. |

@@ -4,6 +4,7 @@ import logging
 from config.loader import load_config, validate_ibkr_settings
 from brokers.ibkr.adapter import IBKRAdapter
 from brokers.schwab.adapter import SchwabAdapter
+from brokers.public.adapter import PublicAdapter
 from engine.engine import GridEngine
 from sheets.interface import SheetInterface
 
@@ -36,6 +37,13 @@ async def main():
         )
     elif config.active_broker == "schwab":
         broker = SchwabAdapter()
+    elif config.active_broker == "public":
+        broker = PublicAdapter(
+            secret_key=config.public_secret_key,
+            account_id=config.public_account_id,
+            preflight_enabled=config.public_preflight_enabled,
+            prefer_replace=config.public_prefer_replace,
+        )
     else:
         print(f"Error: Unsupported broker '{config.active_broker}'", file=sys.stderr)
         sys.exit(1)

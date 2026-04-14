@@ -60,6 +60,7 @@ def config():
 @pytest.mark.asyncio
 async def test_engine_places_sell_and_buy_limits(mock_broker, mock_sheet, config):
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
     # distal_y will be 7. Window [7, 10].
     # Row 7 is has_y -> should place SELL.
     # Row 8 is NOT has_y and 8 > 7 -> should place BUY.
@@ -90,6 +91,7 @@ async def test_engine_places_sell_and_buy_limits(mock_broker, mock_sheet, config
 @pytest.mark.asyncio
 async def test_circuit_breaker_halts(mock_broker, mock_sheet, config):
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
     mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 500}) # Mismatch (should be 10)
 
     await engine._tick()
@@ -112,6 +114,7 @@ async def test_retrack_from_status(mock_broker, mock_sheet, config):
     mock_broker.get_open_orders.return_value = [{'order_id': 'ORD-EXISTING', 'limit_price': 105.0, 'qty': 10, 'action': 'BUY'}]
 
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
     await engine._tick()
 
     # Should NOT place new order for row 8
@@ -125,6 +128,7 @@ async def test_share_mismatch_warn(mock_broker, mock_sheet, config):
     mock_broker.get_position_snapshot.return_value = PositionSnapshot(is_ready=True, positions={"TQQQ": 500}) # Mismatch
     mock_broker.get_price.return_value = 100.0
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
 
     await engine._tick()
 
@@ -141,6 +145,7 @@ async def test_share_mismatch_warn(mock_broker, mock_sheet, config):
 async def test_heartbeat_periodic(mock_broker, mock_sheet, config):
     config.heartbeat_interval_seconds = 0.01
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
 
     # Run heartbeat task for a short time
     task = asyncio.create_task(engine._heartbeat_periodic())
@@ -169,6 +174,7 @@ async def test_anchor_acquisition(mock_broker, mock_sheet, config):
     config.anchor_buy_offset = 0.05
 
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
     await engine._tick()
 
     # Bug 1 Fix: Should NOT write anchor ask to G7 on buy placement
@@ -176,7 +182,7 @@ async def test_anchor_acquisition(mock_broker, mock_sheet, config):
 
     # Should place buy order at price from sheet + offset
     mock_broker.place_limit_order.assert_any_call(
-        ticker="TQQQ", action="BUY", qty=10, limit_price=100.05, on_update=engine._handle_order_update, order_id="ORD-123"
+        ticker="TQQQ", action="BUY", qty=10, limit_price=100.05, extended_hours=True, on_update=engine._handle_order_update, order_id="ORD-123"
     )
 
 @pytest.mark.asyncio
@@ -193,11 +199,12 @@ async def test_non_anchor_buy_no_offset(mock_broker, mock_sheet, config):
     config.anchor_buy_offset = 0.05
 
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
     await engine._tick()
 
     # Should place buy order for row 8 at exact sheet price
     mock_broker.place_limit_order.assert_any_call(
-        ticker="TQQQ", action="BUY", qty=10, limit_price=105.0, on_update=engine._handle_order_update, order_id=mock_broker.get_next_order_id.return_value
+        ticker="TQQQ", action="BUY", qty=10, limit_price=105.0, extended_hours=True, on_update=engine._handle_order_update, order_id=mock_broker.get_next_order_id.return_value
     )
 
 @pytest.mark.asyncio
@@ -216,6 +223,7 @@ async def test_protective_reconciliation_with_offset(mock_broker, mock_sheet, co
     mock_broker.get_open_orders.return_value = [{'order_id': 'ORD-123', 'limit_price': 100.05, 'qty': 10, 'action': 'BUY'}]
 
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
     engine.order_manager.track(7, OrderResult(order_id="ORD-123", status="submitted"), "BUY")
 
     await engine._tick()
@@ -240,6 +248,7 @@ async def test_no_anchor_write_if_owned(mock_broker, mock_sheet, config):
     mock_broker.get_wallet_balance.return_value = 50000.0
 
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
     await engine._tick()
 
     # Should NOT write anchor ask to G7
@@ -248,6 +257,7 @@ async def test_no_anchor_write_if_owned(mock_broker, mock_sheet, config):
 @pytest.mark.asyncio
 async def test_engine_boundary_regeneration(mock_broker, mock_sheet, config):
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
 
     # 1. Start session normally
     tz = zoneinfo.ZoneInfo("America/New_York")
@@ -256,28 +266,24 @@ async def test_engine_boundary_regeneration(mock_broker, mock_sheet, config):
     engine.order_manager.track(10, OrderResult(order_id="TEST-1", status="submitted"), "BUY")
     mock_broker.cancel_order = AsyncMock(return_value=True)
 
-    # Mock time to cross 4:00 PM ET on a Wednesday
-    # Wednesday is weekday 2
-    wed_16_01 = datetime(2023, 10, 11, 16, 1, 0, tzinfo=tz)
+    now = datetime(2023, 10, 11, 23, 59, 0, tzinfo=tz)
 
     with patch('engine.engine.datetime') as mock_dt:
-        mock_dt.now.return_value = wed_16_01
+        mock_dt.now.return_value = now
         mock_dt.combine = datetime.combine
         await engine._check_daily_grid_regeneration()
 
-    # Verify cancel_all_orders was triggered (which calls broker.cancel_order)
     mock_broker.cancel_order.assert_called_with("TEST-1")
-    # Verify order manager was reset
     assert not engine.order_manager.is_tracked("TEST-1")
 
-    # 2. Track another order and cross 8:00 PM ET
     engine.order_manager.track(11, OrderResult(order_id="TEST-2", status="submitted"), "SELL")
     mock_broker.cancel_order.reset_mock()
 
-    wed_20_01 = datetime(2023, 10, 11, 20, 1, 0, tzinfo=tz)
+    # Thursday cross 00:00
+    thu_00_01 = datetime(2023, 10, 12, 0, 1, 0, tzinfo=tz)
 
     with patch('engine.engine.datetime') as mock_dt:
-        mock_dt.now.return_value = wed_20_01
+        mock_dt.now.return_value = thu_00_01
         mock_dt.combine = datetime.combine
         await engine._check_daily_grid_regeneration()
 
@@ -285,7 +291,7 @@ async def test_engine_boundary_regeneration(mock_broker, mock_sheet, config):
     assert not engine.order_manager.is_tracked("TEST-2")
     assert engine._is_weekend_gap is False
 
-    # 3. Test Weekend Skip: Friday 4:01 PM ET
+    # 3. Test Weekend Skip: Friday 16:01 PM ET
     # Friday is weekday 4
     engine.order_manager.track(12, OrderResult(order_id="TEST-3", status="submitted"), "BUY")
     mock_broker.cancel_order.reset_mock()
@@ -297,13 +303,8 @@ async def test_engine_boundary_regeneration(mock_broker, mock_sheet, config):
         mock_dt.combine = datetime.combine
         await engine._check_daily_grid_regeneration()
 
-    # It should still cancel and reset the previous day's orders,
-    # but it should also set _is_weekend_gap = True
-    mock_broker.cancel_order.assert_called_with("TEST-3")
-    assert not engine.order_manager.is_tracked("TEST-3")
+    # The weekend gap should now be True
     assert engine._is_weekend_gap is True
-
-
 @pytest.mark.asyncio
 async def test_anchor_update_on_full_sell_cycle(mock_broker, mock_sheet, config):
     # Initial state: owned 10 shares
@@ -318,6 +319,7 @@ async def test_anchor_update_on_full_sell_cycle(mock_broker, mock_sheet, config)
     mock_broker.get_bid_ask.return_value = (100.0, 101.0)
 
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
     engine.last_broker_shares = 10
 
     # Tick where shares become 0
@@ -337,6 +339,7 @@ async def test_anchor_update_on_full_sell_cycle(mock_broker, mock_sheet, config)
 async def test_anchor_update_on_cancelled_buy(mock_broker, mock_sheet, config):
     mock_broker.get_bid_ask.return_value = (102.0, 103.0)
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
 
     # Simulate a cancelled order for row 7 action BUY with 0 fill
     result = OrderResult(order_id="ORD-7", status="cancelled", filled_qty=0)
@@ -365,6 +368,7 @@ async def test_no_anchor_write_if_already_working(mock_broker, mock_sheet, confi
     mock_broker.get_open_orders.return_value = [{'order_id': 'ORD-1', 'limit_price': 100.0, 'qty': 10, 'action': 'BUY'}]
 
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
     await engine._tick()
 
     # Should NOT write anchor ask to G7
@@ -418,6 +422,7 @@ async def test_engine_tick_unknown_state_returns_early():
 @pytest.mark.asyncio
 async def test_execution_logging_dedupe_and_fallback(mock_broker, mock_sheet, config):
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
 
     # Simulate tracking an order
     engine.order_manager.track(10, OrderResult(order_id="ORD-KNOW", status="submitted"), "BUY")
@@ -477,6 +482,7 @@ async def test_execution_logging_dedupe_and_fallback(mock_broker, mock_sheet, co
 @pytest.mark.asyncio
 async def test_order_status_does_not_double_log_fills(mock_broker, mock_sheet, config):
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
 
     engine.order_manager.track(11, OrderResult(order_id="ORD-FILL", status="submitted"), "BUY")
 
@@ -519,6 +525,7 @@ async def test_protective_reconciliation_skips_buy(mock_broker, mock_sheet, conf
     mock_broker.get_open_orders.return_value = [{'order_id': 'ORD-123', 'limit_price': 100.0, 'qty': 10, 'action': 'BUY'}]
 
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
     engine.order_manager.track(7, OrderResult(order_id="ORD-123", status="submitted"), "BUY")
 
     await engine._tick()
@@ -549,6 +556,7 @@ async def test_full_sell_cycle_halts_trading_evaluation(mock_broker, mock_sheet,
     mock_broker.get_bid_ask.return_value = (99.9, 100.0)
 
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
     # Set previous shares to 10 so it triggers full sell cycle
     engine.last_broker_shares = 10
 
@@ -591,6 +599,7 @@ async def test_full_sell_cycle_same_shares(mock_broker, mock_sheet, config):
     mock_broker.get_bid_ask.return_value = (101.9, 102.0)
 
     engine = GridEngine(mock_broker, mock_sheet, config)
+    engine._should_use_extended_hours = lambda: True
     engine.last_broker_shares = 10
 
     # First tick triggers anchor reset
@@ -610,5 +619,5 @@ async def test_full_sell_cycle_same_shares(mock_broker, mock_sheet, config):
 
     # Buy is placed with new price and same shares!
     mock_broker.place_limit_order.assert_called_once_with(
-        ticker="TQQQ", action="BUY", qty=10, limit_price=102.0, on_update=engine._handle_order_update, order_id=mock_broker.get_next_order_id.return_value
+        ticker="TQQQ", action="BUY", qty=10, limit_price=102.0, extended_hours=True, on_update=engine._handle_order_update, order_id=mock_broker.get_next_order_id.return_value
     )

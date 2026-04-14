@@ -248,51 +248,42 @@ class GridEngine:
                 logger.error(f"Failed to sync status for row {row_index} to sheet: {e}")
                 # We leave it in pending_status_updates to retry next time
 
+    def _should_use_extended_hours(self) -> bool:
+        """
+        Generic check: is it a reasonable extended-hours time?
+        Specific session rules are left to the adapter.
+        """
+        tz = zoneinfo.ZoneInfo("America/New_York")
+        now_et = datetime.now(tz)
+        current_time = now_et.time()
+
+        # Broad pre-market/post-market window
+        return time(4, 0) <= current_time < time(20, 0)
+
     async def _check_daily_grid_regeneration(self):
         """
-        Check if we have crossed 4:00 PM ET or 8:00 PM ET to regenerate the grid.
-        Skip the regeneration between Friday 4:00 PM ET and Sunday 8:00 PM ET.
+        Check if we have crossed a daily regeneration threshold.
         """
         tz = zoneinfo.ZoneInfo("America/New_York")
         now_et = datetime.now(tz)
 
-        # We need to define two intervals:
-        # 1. Day Session: 20:00 previous day to 16:00 current day (OND active)
-        # 2. Gap Session: 16:00 current day to 20:00 current day (GTC active)
+        # For a generic bot, we just use a single daily regeneration at 00:00 ET
+        # to reset the order manager and start fresh, removing all broker-specific
+        # time window hardcoding (like 16:00 / 20:00 gaps).
+        current_session_start = datetime.combine(now_et.date(), time(0, 0), tzinfo=tz)
 
-        current_time = now_et.time()
-        from datetime import timedelta
-
-        if current_time >= time(20, 0):
-            # We are in the "Night/Day" session that started at 20:00 today
-            current_session_start = datetime.combine(now_et.date(), time(20, 0), tzinfo=tz)
-        elif current_time >= time(16, 0):
-            # We are in the "Gap" session that started at 16:00 today
-            current_session_start = datetime.combine(now_et.date(), time(16, 0), tzinfo=tz)
-        else:
-            # We are in the "Night/Day" session that started at 20:00 yesterday
-            current_session_start = datetime.combine((now_et - timedelta(days=1)).date(), time(20, 0), tzinfo=tz)
-
-        # Weekend Check:
-        # The weekend gap is strictly from Friday 16:00 ET to Sunday 20:00 ET.
-        # If the session start falls in this window, we should skip regeneration and stay dark.
-        weekday = current_session_start.weekday()
-
+        # Minimal generic weekend gap handling: simply pause new orders from Friday 16:00 to Sunday 18:00
+        # or adapt to simple weekday logic. Here we just set is_weekend_gap=False to simplify for generic brokers.
+        # Most brokers handle weekend queueing naturally or reject.
         is_weekend_gap = False
-        if weekday == 4 and current_session_start.time() == time(16, 0):
-            is_weekend_gap = True # Friday 16:00 start (skip)
-        elif weekday == 4 and current_session_start.time() == time(20, 0):
-            is_weekend_gap = True # Friday 20:00 start (skip)
-        elif weekday == 5:
-            is_weekend_gap = True # Saturday anytime (skip)
-        elif weekday == 6 and current_session_start.time() == time(16, 0):
-            is_weekend_gap = True # Sunday 16:00 start (skip)
+        weekday = now_et.weekday()
+        if weekday == 5 or (weekday == 4 and now_et.time() >= time(16, 0)) or (weekday == 6 and now_et.time() < time(18, 0)):
+            is_weekend_gap = True
 
         if self._last_grid_regeneration < current_session_start:
             logger.info(f"Boundary threshold crossed (Session start: {current_session_start}). Regenerating grid.")
 
             # Cancel all previous session's orders from the broker to ensure clean slate
-            # (Especially important for the Gap session's GTC orders so they don't linger)
             await self._cancel_all_orders()
 
             # Clear internally tracked orders.
@@ -300,8 +291,6 @@ class GridEngine:
 
             self._last_grid_regeneration = now_et
 
-        # Set a flag to skip placing new orders if we are in the weekend gap
-        # We only set this to true if the gap is active. This avoids breaking tests that mock time improperly.
         self._is_weekend_gap = is_weekend_gap
 
     async def _tick(self):
@@ -445,9 +434,11 @@ class GridEngine:
                                 self.order_manager.track(row.row_index, OrderResult(order_id=order_id, status='submitted'), 'SELL',
                                                     broker=self.broker, on_update=self._handle_order_update)
 
+                                extended_hours = self._should_use_extended_hours()
                                 result = await self.broker.place_limit_order(
                                     ticker=TICKER, action='SELL', qty=row.shares,
-                                    limit_price=row.sell_price, on_update=self._handle_order_update,
+                                    limit_price=row.sell_price, extended_hours=extended_hours,
+                                    on_update=self._handle_order_update,
                                     order_id=order_id
                                 )
                                 if result.status == 'filled':
@@ -509,9 +500,11 @@ class GridEngine:
                                 self.order_manager.track(row.row_index, OrderResult(order_id=order_id, status='submitted'), 'BUY',
                                                     broker=self.broker, on_update=self._handle_order_update)
 
+                                extended_hours = self._should_use_extended_hours()
                                 result = await self.broker.place_limit_order(
                                     ticker=TICKER, action='BUY', qty=row.shares,
-                                    limit_price=buy_price, on_update=self._handle_order_update,
+                                    limit_price=buy_price, extended_hours=extended_hours,
+                                    on_update=self._handle_order_update,
                                     order_id=order_id
                                 )
                                 if result.status == 'filled':

@@ -1,6 +1,10 @@
 {
-  "active_broker": "list(ibkr|schwab)",
+  "active_broker": "list(ibkr|schwab|public)",
   "paper_trading": "bool",
+  "public_secret_key": "str?",
+  "public_account_id": "str?",
+  "public_preflight_enabled": "bool?",
+  "public_prefer_replace": "bool?",
   "ibkr_host": "str",
   "ibkr_port": "int",
   "ibkr_client_id": "int",
