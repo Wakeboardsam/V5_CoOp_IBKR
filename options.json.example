@@ -1,0 +1,16 @@
+{
+  "active_broker": "public",
+  "public_secret_key": "YOUR_PUBLIC_API_SECRET_KEY",
+  "public_account_id": "YOUR_ACCOUNT_ID",
+  "public_preflight_enabled": true,
+  "public_prefer_replace": true,
+  "paper_trading": true,
+  "poll_interval_seconds": 60,
+  "heartbeat_interval_seconds": 60,
+  "health_log_interval_seconds": 300,
+  "anchor_buy_offset": 0.0,
+  "share_mismatch_mode": "halt",
+  "max_spread_pct": 0.5,
+  "google_sheet_id": "YOUR_GOOGLE_SHEET_ID",
+  "google_credentials_json": "YOUR_GOOGLE_SERVICE_ACCOUNT_JSON"
+}

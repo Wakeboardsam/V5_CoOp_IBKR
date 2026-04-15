@@ -176,7 +176,7 @@ async def test_anchor_acquisition(mock_broker, mock_sheet, config):
 
     # Should place buy order at price from sheet + offset
     mock_broker.place_limit_order.assert_any_call(
-        ticker="TQQQ", action="BUY", qty=10, limit_price=100.05, on_update=engine._handle_order_update, order_id="ORD-123"
+        ticker="TQQQ", action="BUY", qty=10, limit_price=100.05, extended_hours=True, on_update=engine._handle_order_update, order_id="ORD-123"
     )
 
 @pytest.mark.asyncio
@@ -197,7 +197,7 @@ async def test_non_anchor_buy_no_offset(mock_broker, mock_sheet, config):
 
     # Should place buy order for row 8 at exact sheet price
     mock_broker.place_limit_order.assert_any_call(
-        ticker="TQQQ", action="BUY", qty=10, limit_price=105.0, on_update=engine._handle_order_update, order_id=mock_broker.get_next_order_id.return_value
+        ticker="TQQQ", action="BUY", qty=10, limit_price=105.0, extended_hours=True, on_update=engine._handle_order_update, order_id=mock_broker.get_next_order_id.return_value
     )
 
 @pytest.mark.asyncio
@@ -610,5 +610,5 @@ async def test_full_sell_cycle_same_shares(mock_broker, mock_sheet, config):
 
     # Buy is placed with new price and same shares!
     mock_broker.place_limit_order.assert_called_once_with(
-        ticker="TQQQ", action="BUY", qty=10, limit_price=102.0, on_update=engine._handle_order_update, order_id=mock_broker.get_next_order_id.return_value
+        ticker="TQQQ", action="BUY", qty=10, limit_price=102.0, extended_hours=True, on_update=engine._handle_order_update, order_id=mock_broker.get_next_order_id.return_value
     )

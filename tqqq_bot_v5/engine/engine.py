@@ -447,7 +447,7 @@ class GridEngine:
 
                                 result = await self.broker.place_limit_order(
                                     ticker=TICKER, action='SELL', qty=row.shares,
-                                    limit_price=row.sell_price, on_update=self._handle_order_update,
+                                    limit_price=row.sell_price, extended_hours=True, on_update=self._handle_order_update,
                                     order_id=order_id
                                 )
                                 if result.status == 'filled':
@@ -511,7 +511,7 @@ class GridEngine:
 
                                 result = await self.broker.place_limit_order(
                                     ticker=TICKER, action='BUY', qty=row.shares,
-                                    limit_price=buy_price, on_update=self._handle_order_update,
+                                    limit_price=buy_price, extended_hours=True, on_update=self._handle_order_update,
                                     order_id=order_id
                                 )
                                 if result.status == 'filled':

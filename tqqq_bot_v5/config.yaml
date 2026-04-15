@@ -10,6 +10,10 @@ boot: auto
 options:
   active_broker: "ibkr"
   paper_trading: true
+  public_secret_key: ""
+  public_account_id: ""
+  public_preflight_enabled: true
+  public_prefer_replace: true
   ibkr_host: "127.0.0.1"
   ibkr_port: 7497
   ibkr_client_id: 1
@@ -22,8 +26,12 @@ options:
   google_sheet_id: ""
   google_credentials_json: ""
 schema:
-  active_broker: "list(ibkr|schwab)"
+  active_broker: "list(ibkr|schwab|public)"
   paper_trading: "bool"
+  public_secret_key: "str?"
+  public_account_id: "str?"
+  public_preflight_enabled: "bool?"
+  public_prefer_replace: "bool?"
   ibkr_host: "str"
   ibkr_port: "int"
   ibkr_client_id: "int"

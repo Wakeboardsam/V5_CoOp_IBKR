@@ -5,3 +5,4 @@ google-auth
 asyncio
 pytest
 pytest-asyncio
+publicdotcom-py>=0.1.10
